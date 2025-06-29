@@ -1,0 +1,12 @@
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+[Bb]in/
+[Oo]bj/
+
+# IntelliJ IDEA cache files
+.idea/
+
+# Visual Studio cache files
+.vs/
