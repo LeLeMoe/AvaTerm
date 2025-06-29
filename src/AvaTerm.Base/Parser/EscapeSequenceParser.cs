@@ -176,6 +176,7 @@ namespace AvaTerm.Parser
             }
         }
 
+        private static readonly byte NonAsciiPrintable = 0xA0;
         private static readonly uint ActionEnumSize = GetEnumMinSize(typeof(Action));
         private static readonly uint StateEnumSize = GetEnumMinSize(typeof(State));
         private static readonly State[] AllStates = Enum.GetValues(typeof(State)).Cast<State>().ToArray();
@@ -339,8 +340,9 @@ namespace AvaTerm.Parser
             table.Add(CodeRange(0x00, 0x17), State.Ground, State.Ground, Action.Execute);
             table.Add(0x19, State.Ground, State.Ground, Action.Execute);
             table.Add(CodeRange(0x1C, 0x1F), State.Ground, State.Ground, Action.Execute);
-            // event 0x20-0x7F / print
+            // event 0x20-0x7F, 0xA0 / print
             table.Add(CodeRange(0x20, 0x7F), State.Ground, State.Ground, Action.Print);
+            table.Add(NonAsciiPrintable, State.Ground, State.Ground, Action.Print);
 
             // Escape intermediate spin transitions
             // ------------------------------------
@@ -380,11 +382,12 @@ namespace AvaTerm.Parser
 
             // Dcs ignore spin transitions
             // ---------------------------
-            // event 0x00-0x17, 0x19, 0x1C-0x1F, 0x20-0x7F / ignore
+            // event 0x00-0x17, 0x19, 0x1C-0x1F, 0x20-0x7F, 0xA0 / ignore
             table.Add(CodeRange(0x00, 0x17), State.DcsIgnore, State.DcsIgnore, Action.Ignore);
             table.Add(0x19, State.DcsIgnore, State.DcsIgnore, Action.Ignore);
             table.Add(CodeRange(0x1C, 0x1F), State.DcsIgnore, State.DcsIgnore, Action.Ignore);
             table.Add(CodeRange(0x20, 0x7F), State.DcsIgnore, State.DcsIgnore, Action.Ignore);
+            table.Add(NonAsciiPrintable, State.DcsIgnore, State.DcsIgnore, Action.Ignore);
 
             // Dcs param spin transitions
             // --------------------------
@@ -398,9 +401,9 @@ namespace AvaTerm.Parser
 
             // Dcs passthrough spin transitions
             // --------------------------------
-            // event 0x00-0x17, 0x19, 0x1C-0x1F, 0x20-0x7E / put
+            // event 0x00-0x17, 0x19, 0x1C-0x1F, 0x20-0x7E, 0xA0 / put
             table.Add(CodeRange(0x00, 0x17), State.DcsPassthrough, State.DcsPassthrough, Action.Put);
-            table.Add(0x19, State.DcsPassthrough, State.DcsPassthrough, Action.Put);
+            table.Add(new byte[] { 0x19, NonAsciiPrintable }, State.DcsPassthrough, State.DcsPassthrough, Action.Put);
             table.Add(CodeRange(0x1C, 0x1F), State.DcsPassthrough, State.DcsPassthrough, Action.Put);
             table.Add(CodeRange(0x20, 0x7E), State.DcsPassthrough, State.DcsPassthrough, Action.Put);
             // event 0x7F / ignore
@@ -414,6 +417,7 @@ namespace AvaTerm.Parser
             table.Add(CodeRange(0x1C, 0x1F), State.AuxString, State.AuxString, Action.Ignore);
             // event 0x20-0x7F / aux string put
             table.Add(CodeRange(0x20, 0x7F), State.AuxString, State.AuxString, Action.AuxStringPut);
+            table.Add(NonAsciiPrintable, State.AuxString, State.AuxString, Action.AuxStringPut);
 
             // Csi entry spin transitions
             // --------------------------
@@ -441,9 +445,9 @@ namespace AvaTerm.Parser
             table.Add(CodeRange(0x00, 0x17), State.CsiIgnore, State.CsiIgnore, Action.Execute);
             table.Add(0x19, State.CsiIgnore, State.CsiIgnore, Action.Execute);
             table.Add(CodeRange(0x1C, 0x1F), State.CsiIgnore, State.CsiIgnore, Action.Execute);
-            // event 0x20-0x3F, 0x7F / ignore
+            // event 0x20-0x3F, 0x7F, 0xA0 / ignore
             table.Add(CodeRange(0x20, 0x3F), State.CsiIgnore, State.CsiIgnore, Action.Ignore);
-            table.Add(0x7F, State.CsiIgnore, State.CsiIgnore, Action.Ignore);
+            table.Add(new byte[] { 0x7F, NonAsciiPrintable }, State.CsiIgnore, State.CsiIgnore, Action.Ignore);
 
             // Csi param spin transitions
             // --------------------------
