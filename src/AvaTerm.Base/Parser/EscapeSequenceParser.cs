@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 
@@ -170,20 +171,52 @@ namespace AvaTerm.Parser
                 }
             }
 
-            public (Action entryAction, Action exitAction) Event(State state, State nextState)
+            public (Action entryAction, Action exitAction) Emit(State state, State nextState)
             {
                 return DecodeValue(_table[EncodeIndex(state, nextState)]);
             }
         }
 
-        private static readonly byte NonAsciiPrintable = 0xA0;
+        public interface IDcsHandler
+        {
+            void Hook(char code, string collect, int[] parameters);
+            void Put(ReadOnlySpan<char> text);
+            void Unhook();
+        }
+
+        public interface IAuxStringHandler
+        {
+            void Start();
+            void Put(ReadOnlySpan<char> text);
+            void End();
+        }
+
+        public delegate void PrintHandlerAction(ReadOnlySpan<char> text);
+
+        private const byte NonAsciiPrintable = 0xA0;
         private static readonly uint ActionEnumSize = GetEnumMinSize(typeof(Action));
         private static readonly uint StateEnumSize = GetEnumMinSize(typeof(State));
         private static readonly State[] AllStates = Enum.GetValues(typeof(State)).Cast<State>().ToArray();
+        private const State InitState = State.Ground;
 
         private TransitionTable _transitionTable = BuildVt500TransitionTable();
         private EventTable _eventTable = BuildVt500EventTable();
-        private State _state = State.Ground;
+
+        // Parser state variables
+        private State _state = InitState;
+        private string _collect = "";
+        private List<int> _param = new List<int> { 0 };
+        private IAuxStringHandler _activeAuxStringHandler = null;
+
+        public PrintHandlerAction PrintHandler { set; get; } = null;
+        public Action<char> ExecuteHandler { set; get; } = null;
+        public Action<char, string> EscapeHandler { set; get; } = null;
+        public Action<char, string, int[]> CsiHandler { set; get; } = null;
+        public IDcsHandler DcsHandler { set; get; } = null;
+        public IAuxStringHandler OscHandler { set; get; } = null;
+        public IAuxStringHandler SosHandler { set; get; } = null;
+        public IAuxStringHandler PmHandler { set; get; } = null;
+        public IAuxStringHandler ApcHandler { set; get; } = null;
 
         private static uint GetEnumMinSize(Type enumType)
         {
@@ -255,7 +288,7 @@ namespace AvaTerm.Parser
             table.Add(CodeRange(0x40, 0x7E), State.CsiEntry, State.Ground, Action.CsiDispatch);
 
             // To escape intermediate transitions
-            // ---------------------------------
+            // ----------------------------------
             // escape -> escape intermediate: 0x20-0x2F / collect
             table.Add(CodeRange(0x20, 0x2F), State.Escape, State.EscapeIntermediate, Action.Collect);
 
@@ -415,7 +448,7 @@ namespace AvaTerm.Parser
             table.Add(CodeRange(0x00, 0x17), State.AuxString, State.AuxString, Action.Ignore);
             table.Add(0x19, State.AuxString, State.AuxString, Action.Ignore);
             table.Add(CodeRange(0x1C, 0x1F), State.AuxString, State.AuxString, Action.Ignore);
-            // event 0x20-0x7F / aux string put
+            // event 0x20-0x7F, 0xA0 / aux string put
             table.Add(CodeRange(0x20, 0x7F), State.AuxString, State.AuxString, Action.AuxStringPut);
             table.Add(NonAsciiPrintable, State.AuxString, State.AuxString, Action.AuxStringPut);
 
@@ -498,6 +531,210 @@ namespace AvaTerm.Parser
             table.AddEntry(State.CsiEntry, Action.Clear);
 
             return table;
+        }
+
+        private static byte MapCode(char code)
+        {
+            var mappedCode = (byte)(code | 0x00FF);
+
+            // Map characters except the C0, GL and C1 sets to 0xA0 to facilitate parsing
+            if (code > '\u00A0')
+            {
+                mappedCode = 0xA0;
+            }
+
+            return mappedCode;
+        }
+
+        public void Reset()
+        {
+            _state = InitState;
+            _collect = "";
+            _param = new List<int> { 0 };
+            _activeAuxStringHandler = null;
+        }
+
+        public void Parse(ReadOnlySpan<char> data)
+        {
+            for (var i = 0; i < data.Length; ++i)
+            {
+                var rawCode = data[i];
+                var code = MapCode(rawCode);
+
+                // Transition states and emit events
+                var (transitionAction, nextState) = _transitionTable.Transition(code, _state);
+                var (entryAction, exitAction) = _eventTable.Emit(_state, nextState);
+
+                Debug.Assert(nextState != State.Invalid);
+                Debug.Assert(transitionAction != Action.Invalid);
+
+                // Handle exit event
+                switch (exitAction)
+                {
+                    case Action.Unhook:
+                        DcsHandler?.Unhook();
+                        break;
+
+                    case Action.AuxStringEnd:
+                        _activeAuxStringHandler?.End();
+                        _activeAuxStringHandler = null;
+                        break;
+
+                    case Action.Invalid:
+                        break;
+
+                    default:
+                        // TODO
+                        break;
+                }
+
+                // Handle transition event
+                switch (transitionAction)
+                {
+                    case Action.Execute:
+                        ExecuteHandler?.Invoke(rawCode);
+                        break;
+
+                    case Action.Print:
+                        // Read ahead, and find the consecutive printable sequence to reduce calls
+                        for (var j = i + 1;; ++j)
+                        {
+                            var nextCode = MapCode(data[j]);
+
+                            if (j >= data.Length || !(nextCode >= 0x20 && nextCode <= 0x7F || nextCode == 0xA0))
+                            {
+                                PrintHandler?.Invoke(data.Slice(i, j - i));
+                                i = j - 1;
+                                break;
+                            }
+                        }
+
+                        break;
+
+                    case Action.Collect:
+                        _collect += rawCode;
+                        break;
+
+                    case Action.EscDispatch:
+                        EscapeHandler?.Invoke(rawCode, _collect);
+                        break;
+
+                    case Action.Param:
+                        // Param is a number list separated by semicolon
+                        if (code == 0x3B)
+                        {
+                            _param.Add(0);
+                        }
+                        else
+                        {
+                            var index = _param.Count - 1;
+                            _param[index] = _param[index] * 10 + code - 0x30;
+                        }
+
+                        break;
+
+                    case Action.CsiDispatch:
+                        CsiHandler?.Invoke(rawCode, _collect, _param.ToArray());
+                        break;
+
+                    case Action.Put:
+                        // Read ahead, and find the consecutive valid sequence to reduce calls
+                        for (var j = i + 1;; ++j)
+                        {
+                            var nextCode = MapCode(data[j]);
+
+                            if (j >= data.Length || !(nextCode <= 0x17 || nextCode == 0x19 ||
+                                                      nextCode >= 0x1C && nextCode <= 0x1F ||
+                                                      nextCode >= 0x20 && nextCode <= 0x7E || nextCode == 0xA0))
+                            {
+                                DcsHandler?.Put(data.Slice(i, j - i));
+                                i = j - 1;
+                                break;
+                            }
+                        }
+
+                        break;
+
+                    case Action.AuxStringPut:
+                        // Read ahead, and find the consecutive valid sequence to reduce calls
+                        for (var j = i + 1;; ++j)
+                        {
+                            var nextCode = MapCode(data[j]);
+
+                            if (j >= data.Length || !(nextCode >= 0x20 && nextCode <= 0x7F || nextCode == 0xA0))
+                            {
+                                _activeAuxStringHandler?.Put(data.Slice(i, j - i));
+                                i = j - 1;
+                                break;
+                            }
+                        }
+
+                        break;
+
+                    case Action.Ignore:
+                        break;
+
+                    default:
+                        // TODO
+                        break;
+                }
+
+                // Handle entry event
+                switch (entryAction)
+                {
+                    case Action.Clear:
+                        _collect = "";
+                        _activeAuxStringHandler = null;
+                        _param.Clear();
+                        _param.Add(0);
+                        break;
+
+                    case Action.Hook:
+                        DcsHandler?.Hook(rawCode, _collect, _param.ToArray());
+                        break;
+
+                    case Action.AuxStringStart:
+                        switch (code)
+                        {
+                            case 0x58:
+                            case 0x98:
+                                _activeAuxStringHandler = SosHandler;
+                                break;
+
+                            case 0x5D:
+                            case 0x9D:
+                                _activeAuxStringHandler = OscHandler;
+                                break;
+
+                            case 0x5E:
+                            case 0x9E:
+                                _activeAuxStringHandler = PmHandler;
+                                break;
+
+                            case 0x5F:
+                            case 0x9F:
+                                _activeAuxStringHandler = ApcHandler;
+                                break;
+
+                            default:
+                                // TODO
+                                break;
+                        }
+
+                        _activeAuxStringHandler?.Start();
+                        break;
+
+                    case Action.Invalid:
+                        break;
+
+                    default:
+                        // TODO
+                        break;
+                }
+
+                // Update state
+                _state = nextState;
+            }
         }
     }
 }
