@@ -46,7 +46,7 @@ namespace AvaTerm.Parser
 
         private class TransitionTable
         {
-            private byte[] _table;
+            private readonly byte[] _table;
 
             private static uint EncodeIndex(byte code, State state)
             {
@@ -115,7 +115,7 @@ namespace AvaTerm.Parser
 
         private class EventTable
         {
-            private byte[] _table;
+            private readonly byte[] _table;
 
             private static uint EncodeIndex(State state, State nextState)
             {
@@ -199,24 +199,24 @@ namespace AvaTerm.Parser
         private static readonly State[] AllStates = Enum.GetValues(typeof(State)).Cast<State>().ToArray();
         private const State InitState = State.Ground;
 
-        private TransitionTable _transitionTable = BuildVt500TransitionTable();
-        private EventTable _eventTable = BuildVt500EventTable();
+        private readonly TransitionTable _transitionTable = BuildVt500TransitionTable();
+        private readonly EventTable _eventTable = BuildVt500EventTable();
 
         // Parser state variables
         private State _state = InitState;
         private string _collect = "";
         private List<int> _param = new List<int> { 0 };
-        private IAuxStringHandler _activeAuxStringHandler = null;
+        private IAuxStringHandler _activeAuxStringHandler;
 
-        public PrintHandlerAction PrintHandler { set; get; } = null;
-        public Action<char> ExecuteHandler { set; get; } = null;
-        public Action<char, string> EscapeHandler { set; get; } = null;
-        public Action<char, string, int[]> CsiHandler { set; get; } = null;
-        public IDcsHandler DcsHandler { set; get; } = null;
-        public IAuxStringHandler OscHandler { set; get; } = null;
-        public IAuxStringHandler SosHandler { set; get; } = null;
-        public IAuxStringHandler PmHandler { set; get; } = null;
-        public IAuxStringHandler ApcHandler { set; get; } = null;
+        public PrintHandlerAction PrintHandler { set; get; }
+        public Action<char> ExecuteHandler { set; get; }
+        public Action<char, string> EscapeHandler { set; get; }
+        public Action<char, string, int[]> CsiHandler { set; get; }
+        public IDcsHandler DcsHandler { set; get; }
+        public IAuxStringHandler OscHandler { set; get; }
+        public IAuxStringHandler SosHandler { set; get; }
+        public IAuxStringHandler PmHandler { set; get; }
+        public IAuxStringHandler ApcHandler { set; get; }
 
         private static uint GetEnumMinSize(Type enumType)
         {
@@ -535,7 +535,7 @@ namespace AvaTerm.Parser
 
         private static byte MapCode(char code)
         {
-            var mappedCode = (byte)(code | 0x00FF);
+            var mappedCode = (byte)(code & 0x00FF);
 
             // Map characters except the C0, GL and C1 sets to 0xA0 to facilitate parsing
             if (code > '\u00A0')
@@ -565,8 +565,8 @@ namespace AvaTerm.Parser
                 var (transitionAction, nextState) = _transitionTable.Transition(code, _state);
                 var (entryAction, exitAction) = _eventTable.Emit(_state, nextState);
 
-                Debug.Assert(nextState != State.Invalid);
-                Debug.Assert(transitionAction != Action.Invalid);
+                Debug.Assert(nextState != State.Invalid, "Invalid state");
+                Debug.Assert(transitionAction != Action.Invalid, "Invalid transition action");
 
                 // Handle exit event
                 switch (exitAction)
@@ -584,7 +584,7 @@ namespace AvaTerm.Parser
                         break;
 
                     default:
-                        // TODO
+                        Debug.Assert(false, "Unexpected action");
                         break;
                 }
 
@@ -599,7 +599,7 @@ namespace AvaTerm.Parser
                         // Read ahead, and find the consecutive printable sequence to reduce calls
                         for (var j = i + 1;; ++j)
                         {
-                            var nextCode = MapCode(data[j]);
+                            var nextCode = (j < data.Length) ? MapCode(data[j]) : (byte)0x00;
 
                             if (j >= data.Length || !(nextCode >= 0x20 && nextCode <= 0x7F || nextCode == 0xA0))
                             {
@@ -641,7 +641,7 @@ namespace AvaTerm.Parser
                         // Read ahead, and find the consecutive valid sequence to reduce calls
                         for (var j = i + 1;; ++j)
                         {
-                            var nextCode = MapCode(data[j]);
+                            var nextCode = (j < data.Length) ? MapCode(data[j]) : (byte)0x00;
 
                             if (j >= data.Length || !(nextCode <= 0x17 || nextCode == 0x19 ||
                                                       nextCode >= 0x1C && nextCode <= 0x1F ||
@@ -659,7 +659,7 @@ namespace AvaTerm.Parser
                         // Read ahead, and find the consecutive valid sequence to reduce calls
                         for (var j = i + 1;; ++j)
                         {
-                            var nextCode = MapCode(data[j]);
+                            var nextCode = (j < data.Length) ? MapCode(data[j]) : (byte)0x00;
 
                             if (j >= data.Length || !(nextCode >= 0x20 && nextCode <= 0x7F || nextCode == 0xA0))
                             {
@@ -675,7 +675,7 @@ namespace AvaTerm.Parser
                         break;
 
                     default:
-                        // TODO
+                        Debug.Assert(false, "Unexpected action");
                         break;
                 }
 
@@ -717,7 +717,7 @@ namespace AvaTerm.Parser
                                 break;
 
                             default:
-                                // TODO
+                                Debug.Assert(false, "Unexpected character");
                                 break;
                         }
 
@@ -728,7 +728,7 @@ namespace AvaTerm.Parser
                         break;
 
                     default:
-                        // TODO
+                        Debug.Assert(false, "Unexpected action");
                         break;
                 }
 
