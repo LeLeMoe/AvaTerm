@@ -149,7 +149,7 @@ namespace AvaTerm.Parser
 
             public void AddEntry(State state, Action action)
             {
-                var otherStates = AllStates.Except(new State[] { state }).ToArray();
+                var otherStates = AllStates.Except(new[] { state }).ToArray();
 
                 foreach (var otherState in otherStates)
                 {
@@ -161,7 +161,7 @@ namespace AvaTerm.Parser
 
             public void AddExit(State state, Action action)
             {
-                var otherStates = AllStates.Except(new State[] { state }).ToArray();
+                var otherStates = AllStates.Except(new[] { state }).ToArray();
 
                 foreach (var otherState in otherStates)
                 {
@@ -208,7 +208,7 @@ namespace AvaTerm.Parser
         private List<int> _param = new List<int> { 0 };
         private IAuxStringHandler _activeAuxStringHandler;
 
-        public bool LegacyMode { get; set; } = false;
+        public bool LegacyMode { get; set; }
         public PrintHandlerAction PrintHandler { set; get; }
         public Action<char> ExecuteHandler { set; get; }
         public Action<char, string> EscapeHandler { set; get; }

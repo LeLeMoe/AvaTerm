@@ -141,15 +141,7 @@ public class EscapeSequenceParserTests
             }
         }
 
-        private MockDcsHandler _dcsHandler;
-        private MockAuxStringHandler _oscHandler;
-        private MockAuxStringHandler _sosHandler;
-        private MockAuxStringHandler _pmHandler;
-        private MockAuxStringHandler _apcHandler;
-
-        private List<ActionRecord> _actions = [];
-
-        public List<ActionRecord> Actions => _actions;
+        public List<ActionRecord> Actions { get; } = [];
 
         private void PrintHandler(ReadOnlySpan<char> text)
         {
@@ -173,26 +165,20 @@ public class EscapeSequenceParserTests
 
         private void Record(ActionRecord record)
         {
-            _actions.Add(record);
+            Actions.Add(record);
         }
 
         public MockHandler(EscapeSequenceParser parser)
         {
-            _dcsHandler = new MockDcsHandler(Record);
-            _oscHandler = new MockAuxStringHandler("osc", Record);
-            _sosHandler = new MockAuxStringHandler("sos", Record);
-            _pmHandler = new MockAuxStringHandler("pm", Record);
-            _apcHandler = new MockAuxStringHandler("apc", Record);
-
             parser.PrintHandler = PrintHandler;
             parser.ExecuteHandler = ExecuteHandler;
             parser.EscapeHandler = EscapeHandler;
             parser.CsiHandler = CsiHandler;
-            parser.DcsHandler = _dcsHandler;
-            parser.OscHandler = _oscHandler;
-            parser.SosHandler = _sosHandler;
-            parser.PmHandler = _pmHandler;
-            parser.ApcHandler = _apcHandler;
+            parser.DcsHandler = new MockDcsHandler(Record);
+            parser.OscHandler = new MockAuxStringHandler("osc", Record);
+            parser.SosHandler = new MockAuxStringHandler("sos", Record);
+            parser.PmHandler = new MockAuxStringHandler("pm", Record);
+            parser.ApcHandler = new MockAuxStringHandler("apc", Record);
         }
     }
 
@@ -310,44 +296,124 @@ public class EscapeSequenceParserTests
 
         // Deconstruct the returned tuple
         var resultType = result.GetType();
-        var resultAction = resultType.GetField("Item1");
-        var resultState = resultType.GetField("Item2");
-        Assert.NotNull(resultAction);
-        Assert.NotNull(resultState);
+        var resultActionItem = resultType.GetField("Item1");
+        var resultStateItem = resultType.GetField("Item2");
+        Assert.NotNull(resultActionItem);
+        Assert.NotNull(resultStateItem);
+
+        var resultActionValue = resultActionItem.GetValue(result);
+        var resultStateValue = resultStateItem.GetValue(result);
+        Assert.NotNull(resultActionValue);
+        Assert.NotNull(resultStateValue);
+
+        var resultActionName = Enum.GetName(resultActionItem.FieldType, resultActionValue);
+        var resultStateName = Enum.GetName(resultStateItem.FieldType, resultStateValue);
+        Assert.NotNull(resultActionName);
+        Assert.NotNull(resultStateName);
 
         // Check results
-        Assert.NotEqual(resultAction.Name, invalidAction.Name);
-        Assert.NotEqual(resultState.Name, invalidState.Name);
+        Assert.NotEqual(invalidAction.Name, resultActionName);
+        Assert.NotEqual(invalidState.Name, resultStateName);
     }
 
-    public static TheoryData<char> GetMapCodeAnyInputTestData()
+    public static TheoryData<char, byte> GetMapCodeTestDataForLegacyMode()
     {
-        var data = new TheoryData<char>();
-
-        for (var code = 0x0000; code <= 0xFFFF; ++code)
+        return new TheoryData<char, byte>
         {
-            data.Add((char)code);
-        }
+            // Invalid Unicode characters
+            { '\u0100', 0x00 },
+            { '\uFFFF', 0x00 },
+            { '\uF90C', 0x00 },
+            { '\u306A', 0x00 },
 
-        return data;
+            // Characters in GR area
+            { '\u00A0', 0x20 },
+            { '\u00FF', 0x7F },
+            { '\u00C1', 0x41 },
+            { '\u00FA', 0x7A },
+
+            // Characters in C0, C1 and GL areas
+            { '\u0000', 0x00 },
+            { '\u001F', 0x1F },
+            { '\u0009', 0x09 },
+            { '\u001B', 0x1B },
+            { '\u0080', 0x80 },
+            { '\u009F', 0x9F },
+            { '\u0084', 0x84 },
+            { '\u009B', 0x9B },
+            { '\u0020', 0x20 },
+            { '\u007F', 0x7F },
+            { '\u0041', 0x41 },
+            { '\u007A', 0x7A },
+        };
     }
 
     [Theory]
-    [MemberData(nameof(GetMapCodeAnyInputTestData))]
-    public void MapCode_AnyInput_ReturnCodeInValidRange(char code)
+    [MemberData(nameof(GetMapCodeTestDataForLegacyMode))]
+    public void MapCode_CharInputInLegacyMode_ReturnValidMappedCode(char rawCode, byte mappedCode)
     {
-        var parser = new EscapeSequenceParser();
+        var parser = new EscapeSequenceParser
+        {
+            LegacyMode = true
+        };
 
         // Get MapCode function
         var mapCodeFunc = typeof(EscapeSequenceParser)
             .GetMethod("MapCode", BindingFlags.NonPublic | BindingFlags.Instance);
         Assert.NotNull(mapCodeFunc);
 
-        var result = mapCodeFunc.Invoke(parser, [code]);
+        var result = mapCodeFunc.Invoke(parser, [rawCode]);
         Assert.NotNull(result);
         var resultValue = (byte)result;
 
-        Assert.InRange(resultValue, 0x00, 0xA0);
+        Assert.Equal(mappedCode, resultValue);
+    }
+
+    public static TheoryData<char, byte> GetMapCodeTestDataForUnicodeMode()
+    {
+        return new TheoryData<char, byte>
+        {
+            // Unicode characters
+            { '\u00A0', 0xA0 },
+            { '\uFFFF', 0xA0 },
+            { '\u00BC', 0xA0 },
+            { '\u306A', 0xA0 },
+
+            // Characters in C0, C1 and GL areas
+            { '\u0000', 0x00 },
+            { '\u001F', 0x1F },
+            { '\u0009', 0x09 },
+            { '\u001B', 0x1B },
+            { '\u0080', 0x80 },
+            { '\u009F', 0x9F },
+            { '\u0084', 0x84 },
+            { '\u009B', 0x9B },
+            { '\u0020', 0x20 },
+            { '\u007F', 0x7F },
+            { '\u0041', 0x41 },
+            { '\u007A', 0x7A },
+        };
+    }
+
+    [Theory]
+    [MemberData(nameof(GetMapCodeTestDataForUnicodeMode))]
+    public void MapCode_CharInputInUnicodeMode_ReturnValidMappedCode(char rawCode, byte mappedCode)
+    {
+        var parser = new EscapeSequenceParser
+        {
+            LegacyMode = false
+        };
+
+        // Get MapCode function
+        var mapCodeFunc = typeof(EscapeSequenceParser)
+            .GetMethod("MapCode", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(mapCodeFunc);
+
+        var result = mapCodeFunc.Invoke(parser, [rawCode]);
+        Assert.NotNull(result);
+        var resultValue = (byte)result;
+
+        Assert.Equal(mappedCode, resultValue);
     }
 
     [Theory]
