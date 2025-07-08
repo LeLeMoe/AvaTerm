@@ -208,6 +208,7 @@ namespace AvaTerm.Parser
         private List<int> _param = new List<int> { 0 };
         private IAuxStringHandler _activeAuxStringHandler;
 
+        public bool LegacyMode { get; set; } = false;
         public PrintHandlerAction PrintHandler { set; get; }
         public Action<char> ExecuteHandler { set; get; }
         public Action<char, string> EscapeHandler { set; get; }
@@ -250,6 +251,8 @@ namespace AvaTerm.Parser
             table.Add(CodeRange(0x91, 0x97), AllStates, State.Ground, Action.Execute);
             // anywhere -> ground: 0x9C / ignore
             table.Add(0x9C, AllStates, State.Ground, Action.Ignore);
+            // anywhere -> ground: 0xA0 / print (fallback)
+            table.Add(NonAsciiPrintable, AllStates, State.Ground, Action.Print);
             // anywhere -> escape: 0x1B / ignore
             table.Add(0x1B, AllStates, State.Escape, Action.Ignore);
             // anywhere -> dcs entry: 0x90 / ignore
@@ -436,7 +439,8 @@ namespace AvaTerm.Parser
             // --------------------------------
             // event 0x00-0x17, 0x19, 0x1C-0x1F, 0x20-0x7E, 0xA0 / put
             table.Add(CodeRange(0x00, 0x17), State.DcsPassthrough, State.DcsPassthrough, Action.Put);
-            table.Add(new byte[] { 0x19, NonAsciiPrintable }, State.DcsPassthrough, State.DcsPassthrough, Action.Put);
+            table.Add(new byte[] { 0x19, NonAsciiPrintable }, State.DcsPassthrough, State.DcsPassthrough,
+                Action.Put);
             table.Add(CodeRange(0x1C, 0x1F), State.DcsPassthrough, State.DcsPassthrough, Action.Put);
             table.Add(CodeRange(0x20, 0x7E), State.DcsPassthrough, State.DcsPassthrough, Action.Put);
             // event 0x7F / ignore
@@ -533,17 +537,37 @@ namespace AvaTerm.Parser
             return table;
         }
 
-        private static byte MapCode(char code)
+        private byte MapCode(char code)
         {
-            var mappedCode = (byte)(code & 0x00FF);
-
-            // Map characters except the C0, GL and C1 sets to 0xA0 to facilitate parsing
-            if (code > '\u00A0')
+            if (LegacyMode)
             {
-                mappedCode = 0xA0;
+                if (code > 0x00FF)
+                {
+                    // Handle invalid codes
+                    return 0x00;
+                }
+                else if (code >= 0x00A0)
+                {
+                    // Map all codes in GR area to GL area
+                    return (byte)(code & 0x007F);
+                }
+                else
+                {
+                    return (byte)(code & 0x00FF);
+                }
             }
-
-            return mappedCode;
+            else
+            {
+                if (code >= 0x00A0)
+                {
+                    // Map all Unicode codes greater than 0xA0 to 0xA0
+                    return 0xA0;
+                }
+                else
+                {
+                    return (byte)(code & 0x00FF);
+                }
+            }
         }
 
         public void Reset()
@@ -552,14 +576,14 @@ namespace AvaTerm.Parser
             _collect = "";
             _param = new List<int> { 0 };
             _activeAuxStringHandler = null;
+            LegacyMode = false;
         }
 
         public void Parse(ReadOnlySpan<char> data)
         {
             for (var i = 0; i < data.Length; ++i)
             {
-                var rawCode = data[i];
-                var code = MapCode(rawCode);
+                var code = MapCode(data[i]);
 
                 // Transition states and emit events
                 var (transitionAction, nextState) = _transitionTable.Transition(code, _state);
@@ -592,7 +616,7 @@ namespace AvaTerm.Parser
                 switch (transitionAction)
                 {
                     case Action.Execute:
-                        ExecuteHandler?.Invoke(rawCode);
+                        ExecuteHandler?.Invoke((char)code);
                         break;
 
                     case Action.Print:
@@ -612,11 +636,11 @@ namespace AvaTerm.Parser
                         break;
 
                     case Action.Collect:
-                        _collect += rawCode;
+                        _collect += (char)code;
                         break;
 
                     case Action.EscDispatch:
-                        EscapeHandler?.Invoke(rawCode, _collect);
+                        EscapeHandler?.Invoke((char)code, _collect);
                         break;
 
                     case Action.Param:
@@ -634,7 +658,7 @@ namespace AvaTerm.Parser
                         break;
 
                     case Action.CsiDispatch:
-                        CsiHandler?.Invoke(rawCode, _collect, _param.ToArray());
+                        CsiHandler?.Invoke((char)code, _collect, _param.ToArray());
                         break;
 
                     case Action.Put:
@@ -690,7 +714,7 @@ namespace AvaTerm.Parser
                         break;
 
                     case Action.Hook:
-                        DcsHandler?.Hook(rawCode, _collect, _param.ToArray());
+                        DcsHandler?.Hook((char)code, _collect, _param.ToArray());
                         break;
 
                     case Action.AuxStringStart:

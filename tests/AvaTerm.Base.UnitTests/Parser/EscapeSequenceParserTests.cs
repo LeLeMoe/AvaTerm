@@ -1,4 +1,6 @@
-﻿using AvaTerm.Parser;
+﻿using System.Reflection;
+using AvaTerm.Parser;
+using Xunit.Abstractions;
 using static AvaTerm.Parser.EscapeSequenceParser;
 
 namespace AvaTerm.Base.UnitTests.Parser;
@@ -192,6 +194,160 @@ public class EscapeSequenceParserTests
             parser.PmHandler = _pmHandler;
             parser.ApcHandler = _apcHandler;
         }
+    }
+
+
+    public class TransitionTableCompletenessTestData : IXunitSerializable
+    {
+        private string _stateName = "";
+
+        public byte Code { get; private set; }
+        public int State { get; private set; }
+
+        public TransitionTableCompletenessTestData()
+        {
+        }
+
+        public TransitionTableCompletenessTestData(byte code, int state, string stateName)
+        {
+            Code = code;
+            State = state;
+            _stateName = stateName;
+        }
+
+        public void Deserialize(IXunitSerializationInfo info)
+        {
+            Code = info.GetValue<byte>("Code");
+            State = info.GetValue<int>("State");
+            _stateName = info.GetValue<string>("StateName");
+        }
+
+        public void Serialize(IXunitSerializationInfo info)
+        {
+            info.AddValue("Code", Code);
+            info.AddValue("State", State);
+            info.AddValue("StateName", _stateName);
+        }
+
+        public override string ToString()
+        {
+            return $"(code: {Code}, state: {_stateName})";
+        }
+    }
+
+    private static FieldInfo[] GetAllStates()
+    {
+        var allStates = typeof(EscapeSequenceParser)
+            .GetNestedType("State", BindingFlags.NonPublic)
+            ?.GetFields(BindingFlags.Public | BindingFlags.Static);
+
+        Assert.NotNull(allStates);
+
+        return allStates;
+    }
+
+    private static FieldInfo[] GetAllActions()
+    {
+        var allActions = typeof(EscapeSequenceParser)
+            .GetNestedType("Action", BindingFlags.NonPublic)
+            ?.GetFields(BindingFlags.Public | BindingFlags.Static);
+
+        Assert.NotNull(allActions);
+
+        return allActions;
+    }
+
+    public static TheoryData<TransitionTableCompletenessTestData> GetTransitionTableCompletenessTestData()
+    {
+        var data = new TheoryData<TransitionTableCompletenessTestData>();
+
+        // Get all valid states
+        var validStates = GetAllStates().Where(s => s.Name != "Invalid");
+
+        // Enumerate all states and code range from 0x00 to 0xA0
+        foreach (var state in validStates)
+        {
+            for (byte code = 0x00; code <= 0xA0; ++code)
+            {
+                var stateValue = state.GetValue(null);
+                Assert.NotNull(stateValue);
+                data.Add(new TransitionTableCompletenessTestData(code, (int)stateValue, state.Name));
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetTransitionTableCompletenessTestData))]
+    public void TransitionTable_CheckCompleteness(TransitionTableCompletenessTestData data)
+    {
+        var parser = new EscapeSequenceParser();
+
+        // Get invalid state
+        var invalidState = GetAllStates().FirstOrDefault(s => s.Name == "Invalid");
+        Assert.NotNull(invalidState);
+
+        // Get invalid action
+        var invalidAction = GetAllActions().FirstOrDefault(s => s.Name == "Invalid");
+        Assert.NotNull(invalidAction);
+
+        // Get transition table instance
+        var transitionTable = typeof(EscapeSequenceParser)
+            .GetField("_transitionTable", BindingFlags.NonPublic | BindingFlags.Instance)
+            ?.GetValue(parser);
+        Assert.NotNull(transitionTable);
+
+        // Get transition function
+        var transitionFunc = typeof(EscapeSequenceParser)
+            .GetNestedType("TransitionTable", BindingFlags.NonPublic)
+            ?.GetMethod("Transition", BindingFlags.Public | BindingFlags.Instance);
+        Assert.NotNull(transitionFunc);
+
+        // Query the transition table
+        var result = transitionFunc.Invoke(transitionTable, [data.Code, data.State]);
+        Assert.NotNull(result);
+
+        // Deconstruct the returned tuple
+        var resultType = result.GetType();
+        var resultAction = resultType.GetField("Item1");
+        var resultState = resultType.GetField("Item2");
+        Assert.NotNull(resultAction);
+        Assert.NotNull(resultState);
+
+        // Check results
+        Assert.NotEqual(resultAction.Name, invalidAction.Name);
+        Assert.NotEqual(resultState.Name, invalidState.Name);
+    }
+
+    public static TheoryData<char> GetMapCodeAnyInputTestData()
+    {
+        var data = new TheoryData<char>();
+
+        for (var code = 0x0000; code <= 0xFFFF; ++code)
+        {
+            data.Add((char)code);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetMapCodeAnyInputTestData))]
+    public void MapCode_AnyInput_ReturnCodeInValidRange(char code)
+    {
+        var parser = new EscapeSequenceParser();
+
+        // Get MapCode function
+        var mapCodeFunc = typeof(EscapeSequenceParser)
+            .GetMethod("MapCode", BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.NotNull(mapCodeFunc);
+
+        var result = mapCodeFunc.Invoke(parser, [code]);
+        Assert.NotNull(result);
+        var resultValue = (byte)result;
+
+        Assert.InRange(resultValue, 0x00, 0xA0);
     }
 
     [Theory]
