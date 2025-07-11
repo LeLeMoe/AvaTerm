@@ -3,7 +3,7 @@ using AvaTerm.Parser;
 using Xunit.Abstractions;
 using static AvaTerm.Parser.EscapeSequenceParser;
 
-namespace AvaTerm.Base.UnitTests.Parser;
+namespace AvaTerm.Base.Tests.Parser;
 
 public class EscapeSequenceParserTests
 {

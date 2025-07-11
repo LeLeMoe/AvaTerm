@@ -5,7 +5,7 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvaTerm.Base", "src\AvaTerm.Base\AvaTerm.Base.csproj", "{73B9D009-D7C6-4697-9CEC-6F30E6AF7930}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvaTerm.Base.UnitTests", "tests\AvaTerm.Base.UnitTests\AvaTerm.Base.UnitTests.csproj", "{9EA63488-689B-45D1-8506-A069E0019BA5}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AvaTerm.Base.Tests", "tests\AvaTerm.Base.Tests\AvaTerm.Base.Tests.csproj", "{9EA63488-689B-45D1-8506-A069E0019BA5}"
 	ProjectSection(ProjectDependencies) = postProject
 		{73B9D009-D7C6-4697-9CEC-6F30E6AF7930} = {73B9D009-D7C6-4697-9CEC-6F30E6AF7930}
 	EndProjectSection
