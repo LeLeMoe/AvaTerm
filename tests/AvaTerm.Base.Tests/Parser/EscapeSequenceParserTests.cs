@@ -1,7 +1,9 @@
 ﻿using System.Reflection;
+using AvaTerm.Data;
 using AvaTerm.Parser;
-using Xunit.Abstractions;
 using static AvaTerm.Parser.EscapeSequenceParser;
+using C0 = AvaTerm.Data.C0Controls;
+using C1 = AvaTerm.Data.C1Controls;
 
 namespace AvaTerm.Base.Tests.Parser;
 
@@ -182,10 +184,9 @@ public class EscapeSequenceParserTests
         }
     }
 
-
-    public class TransitionTableCompletenessTestData : IXunitSerializable
+    public class TransitionTableCompletenessTestData
     {
-        private string _stateName = "";
+        private readonly string _stateName = "";
 
         public byte Code { get; private set; }
         public int State { get; private set; }
@@ -199,20 +200,6 @@ public class EscapeSequenceParserTests
             Code = code;
             State = state;
             _stateName = stateName;
-        }
-
-        public void Deserialize(IXunitSerializationInfo info)
-        {
-            Code = info.GetValue<byte>("Code");
-            State = info.GetValue<int>("State");
-            _stateName = info.GetValue<string>("StateName");
-        }
-
-        public void Serialize(IXunitSerializationInfo info)
-        {
-            info.AddValue("Code", Code);
-            info.AddValue("State", State);
-            info.AddValue("StateName", _stateName);
         }
 
         public override string ToString()
@@ -436,10 +423,10 @@ public class EscapeSequenceParserTests
         var handler = new MockHandler(parser);
 
         parser.Parse(text);
-        var result = handler.Actions;
+        var actual = handler.Actions;
 
-        var actual = new List<ActionRecord> { new ActionRecord("print", text) };
-        Assert.True(result.SequenceEqual(actual));
+        var expected = new List<ActionRecord> { new ActionRecord("print", text) };
+        Assert.Equal(expected, actual);
     }
 
     public static TheoryData<string> GetPrintableInputTestDataFoUnicodeMode()
@@ -478,9 +465,51 @@ public class EscapeSequenceParserTests
         var handler = new MockHandler(parser);
 
         parser.Parse(text);
-        var result = handler.Actions;
+        var actual = handler.Actions;
 
-        var actual = new List<ActionRecord> { new ActionRecord("print", text) };
-        Assert.True(result.SequenceEqual(actual));
+        var expected = new List<ActionRecord> { new ActionRecord("print", text) };
+        Assert.Equal(expected, actual);
+    }
+
+    public static TheoryData<bool, string> GetControlCharactersInputTestData()
+    {
+        var data = new TheoryData<bool, string>();
+        var executableC0 = C0.All.Except([C0.ESC]).ToArray();
+        var executableC1 = C1.All.Except([C1.DCS, C1.SOS, C1.CSI, C1.ST, C1.OSC, C1.PM, C1.APC]).ToArray();
+
+        // C0 characters
+        foreach (var code in executableC0)
+        {
+            data.Add(false, code.ToString());
+            data.Add(true, code.ToString());
+        }
+
+        // C1 characters
+        foreach (var code in executableC1)
+        {
+            data.Add(false, code.ToString());
+            data.Add(true, code.ToString());
+        }
+
+        // TODO: C0 & C1 controls sequences
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetControlCharactersInputTestData))]
+    public void Parse_ControlCharactersInput_CallExecuteAction(bool legacyMode, string codes)
+    {
+        var parser = new EscapeSequenceParser
+        {
+            LegacyMode = legacyMode
+        };
+        var handler = new MockHandler(parser);
+
+        parser.Parse(codes);
+        var actual = handler.Actions;
+
+        var expected = codes.Select(code => new ActionRecord("execute", code)).ToList();
+        Assert.Equal(expected, actual);
     }
 }
