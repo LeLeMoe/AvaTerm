@@ -9,7 +9,86 @@ namespace AvaTerm.Base.Tests.Parser;
 
 public class EscapeSequenceParserTests
 {
-    private readonly struct ActionRecord : IEquatable<ActionRecord>
+    private class MockHandler
+    {
+        private class MockDcsHandler(Action<ActionRecord> callback) : IDcsHandler
+        {
+            public void Hook(char code, string collect, int[] parameters)
+            {
+                callback(new ActionRecord("dcs_hook", code, collect, parameters));
+            }
+
+            public void Put(ReadOnlySpan<char> text)
+            {
+                callback(new ActionRecord("dcs_put", text.ToString()));
+            }
+
+            public void Unhook()
+            {
+                callback(new ActionRecord("dcs_unhook"));
+            }
+        }
+
+        private class MockAuxStringHandler(string prefix, Action<ActionRecord> callback) : IAuxStringHandler
+        {
+            public void Start()
+            {
+                callback(new ActionRecord(prefix + "_start"));
+            }
+
+            public void Put(ReadOnlySpan<char> text)
+            {
+                callback(new ActionRecord(prefix + "_put", text.ToString()));
+            }
+
+            public void End()
+            {
+                callback(new ActionRecord(prefix + "_end"));
+            }
+        }
+
+        public List<ActionRecord> Actions { get; } = [];
+
+        private void PrintHandler(ReadOnlySpan<char> text)
+        {
+            Record(new ActionRecord("print", text.ToString()));
+        }
+
+        private void ExecuteHandler(char code)
+        {
+            Record(new ActionRecord("execute", code));
+        }
+
+        private void EscapeHandler(char code, string collect)
+        {
+            Record(new ActionRecord("escape", code, collect));
+        }
+
+        private void CsiHandler(char code, string collect, int[] parameters)
+        {
+            Record(new ActionRecord("csi", code, collect, parameters));
+        }
+
+        private void Record(ActionRecord record)
+        {
+            Actions.Add(record);
+        }
+
+        public MockHandler(EscapeSequenceParser parser)
+        {
+            parser.PrintHandler = PrintHandler;
+            parser.ExecuteHandler = ExecuteHandler;
+            parser.EscapeHandler = EscapeHandler;
+            parser.CsiHandler = CsiHandler;
+            parser.DcsHandler = new MockDcsHandler(Record);
+            parser.OscHandler = new MockAuxStringHandler("osc", Record);
+            parser.SosHandler = new MockAuxStringHandler("sos", Record);
+            parser.PmHandler = new MockAuxStringHandler("pm", Record);
+            parser.ApcHandler = new MockAuxStringHandler("apc", Record);
+        }
+    }
+
+    public readonly struct ActionRecord : IEquatable<ActionRecord>
     {
         private readonly string _action;
         private readonly char? _code;
@@ -103,84 +182,15 @@ public class EscapeSequenceParserTests
 
             return hash.ToHashCode();
         }
-    }
 
-    private class MockHandler
-    {
-        private class MockDcsHandler(Action<ActionRecord> callback) : IDcsHandler
+        public static bool operator ==(ActionRecord left, ActionRecord right)
         {
-            public void Hook(char code, string collect, int[] parameters)
-            {
-                callback(new ActionRecord("dcs_hook", code, collect, parameters));
-            }
-
-            public void Put(ReadOnlySpan<char> text)
-            {
-                callback(new ActionRecord("dcs_put", text.ToString()));
-            }
-
-            public void Unhook()
-            {
-                callback(new ActionRecord("dcs_unhook"));
-            }
+            return left.Equals(right);
         }
 
-        private class MockAuxStringHandler(string prefix, Action<ActionRecord> callback) : IAuxStringHandler
+        public static bool operator !=(ActionRecord left, ActionRecord right)
         {
-            public void Start()
-            {
-                callback(new ActionRecord(prefix + "_start"));
-            }
-
-            public void Put(ReadOnlySpan<char> text)
-            {
-                callback(new ActionRecord(prefix + "_put", text.ToString()));
-            }
-
-            public void End()
-            {
-                callback(new ActionRecord(prefix + "_end"));
-            }
-        }
-
-        public List<ActionRecord> Actions { get; } = [];
-
-        private void PrintHandler(ReadOnlySpan<char> text)
-        {
-            Record(new ActionRecord("print", text.ToString()));
-        }
-
-        private void ExecuteHandler(char code)
-        {
-            Record(new ActionRecord("execute", code));
-        }
-
-        private void EscapeHandler(char code, string collect)
-        {
-            Record(new ActionRecord("escape", code, collect));
-        }
-
-        private void CsiHandler(char code, string collect, int[] parameters)
-        {
-            Record(new ActionRecord("csi", code, collect, parameters));
-        }
-
-        private void Record(ActionRecord record)
-        {
-            Actions.Add(record);
-        }
-
-        public MockHandler(EscapeSequenceParser parser)
-        {
-            parser.PrintHandler = PrintHandler;
-            parser.ExecuteHandler = ExecuteHandler;
-            parser.EscapeHandler = EscapeHandler;
-            parser.CsiHandler = CsiHandler;
-            parser.DcsHandler = new MockDcsHandler(Record);
-            parser.OscHandler = new MockAuxStringHandler("osc", Record);
-            parser.SosHandler = new MockAuxStringHandler("sos", Record);
-            parser.PmHandler = new MockAuxStringHandler("pm", Record);
-            parser.ApcHandler = new MockAuxStringHandler("apc", Record);
+            return !(left == right);
         }
     }
 
@@ -329,7 +339,7 @@ public class EscapeSequenceParserTests
 
     [Theory]
     [MemberData(nameof(GetMapCodeTestDataForLegacyMode))]
-    public void MapCode_CharInputInLegacyMode_ReturnValidMappedCode(char rawCode, byte mappedCode)
+    public void MapCode_LegacyMode_CharInput_ReturnValidMappedCode(char rawCode, byte mappedCode)
     {
         var parser = new EscapeSequenceParser
         {
@@ -368,7 +378,7 @@ public class EscapeSequenceParserTests
 
     [Theory]
     [MemberData(nameof(GetMapCodeTestDataForUnicodeMode))]
-    public void MapCode_CharInputInUnicodeMode_ReturnValidMappedCode(char rawCode, byte mappedCode)
+    public void MapCode_UnicodeMode_CharInput_ReturnValidMappedCode(char rawCode, byte mappedCode)
     {
         var parser = new EscapeSequenceParser
         {
@@ -414,7 +424,7 @@ public class EscapeSequenceParserTests
 
     [Theory]
     [MemberData(nameof(GetPrintableInputTestDataForLegacyMode))]
-    public void Parse_PrintableInputInLegacyMode_CallPrintAction(string text)
+    public void Parse_LegacyMode_PrintableInput_CallPrintHandler(string text)
     {
         var parser = new EscapeSequenceParser
         {
@@ -456,7 +466,7 @@ public class EscapeSequenceParserTests
 
     [Theory]
     [MemberData(nameof(GetPrintableInputTestDataFoUnicodeMode))]
-    public void Parse_PrintableInputInUnicodeMode_CallPrintAction(string text)
+    public void Parse_UnicodeMode_PrintableInput_CallPrintHandler(string text)
     {
         var parser = new EscapeSequenceParser
         {
@@ -491,14 +501,22 @@ public class EscapeSequenceParserTests
             data.Add(true, code.ToString());
         }
 
-        // TODO: C0 & C1 controls sequences
+        // C0 and C1 controls sequences
+        data.Add(false, "\u0006\u000A\u0018");
+        data.Add(true, "\u0006\u000A\u0018");
+        data.Add(false, "\u0081\u008E\u0095\u008F");
+        data.Add(true, "\u0081\u008E\u0095\u008F");
+        data.Add(false, "\u0082\u008F\u0083\u000B\u0094\u0009");
+        data.Add(true, "\u0082\u008F\u0083\u000B\u0094\u0009");
+        data.Add(false, "\u0014\u0011\u0092\u0003\u001E\u008A");
+        data.Add(true, "\u0014\u0011\u0092\u0003\u001E\u008A");
 
         return data;
     }
 
     [Theory]
     [MemberData(nameof(GetControlCharactersInputTestData))]
-    public void Parse_ControlCharactersInput_CallExecuteAction(bool legacyMode, string codes)
+    public void Parse_ControlCharactersInput_CallExecuteHandler(bool legacyMode, string text)
     {
         var parser = new EscapeSequenceParser
         {
@@ -506,10 +524,91 @@ public class EscapeSequenceParserTests
         };
         var handler = new MockHandler(parser);
 
-        parser.Parse(codes);
+        parser.Parse(text);
         var actual = handler.Actions;
 
-        var expected = codes.Select(code => new ActionRecord("execute", code)).ToList();
+        var expected = text.Select(code => new ActionRecord("execute", code)).ToList();
+        Assert.Equal(expected, actual);
+    }
+
+    public static TheoryData<bool, string, List<ActionRecord>> GetEscapeSequenceWithOneIntermediateTestData()
+    {
+        var data = new TheoryData<bool, string, List<ActionRecord>>();
+        var validIntermediate = Enumerable.Range('\u0030', '\u007E' - '\u0030' + 1)
+            .Except(['\u0050', '\u0058', '\u0059', '\u005B', '\u005D', '\u005E', '\u005F'])
+            .Select(c => (char)c)
+            .ToArray();
+
+        foreach (var code in validIntermediate)
+        {
+            data.Add(false, C0.ESC + code.ToString(), [new ActionRecord("escape", code, "")]);
+            data.Add(true, C0.ESC + code.ToString(), [new ActionRecord("escape", code, "")]);
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetEscapeSequenceWithOneIntermediateTestData))]
+    public void Parse_EscapeSequenceWithOneIntermediateInput_CallEscapeHandlerWithEmptyCollect(bool legacyMode,
+        string text, List<ActionRecord> expected)
+    {
+        var parser = new EscapeSequenceParser
+        {
+            LegacyMode = legacyMode
+        };
+        var handler = new MockHandler(parser);
+
+        parser.Parse(text);
+        var actual = handler.Actions;
+
+        Assert.Equal(expected, actual);
+    }
+
+    public static TheoryData<bool, string, List<ActionRecord>> GetEscapeSequenceWithManyIntermediatesTestData()
+    {
+        var data = new TheoryData<bool, string, List<ActionRecord>>();
+        var validIntermediate = Enumerable.Range('\u0020', '\u002F' - '\u0020' + 1)
+            .Select(c => (char)c)
+            .ToArray();
+
+        foreach (var code in validIntermediate)
+        {
+            data.Add(false, C0.ESC + code.ToString() + "\u0030",
+                [new ActionRecord("escape", '\u0030', code.ToString())]);
+            data.Add(true, C0.ESC + code.ToString() + "\u0030",
+                [new ActionRecord("escape", '\u0030', code.ToString())]);
+
+            data.Add(false, C0.ESC + code.ToString() + "\u007E",
+                [new ActionRecord("escape", '\u007E', code.ToString())]);
+            data.Add(true, C0.ESC + code.ToString() + "\u007E",
+                [new ActionRecord("escape", '\u007E', code.ToString())]);
+
+            data.Add(false, C0.ESC + code.ToString() + "\u0059",
+                [new ActionRecord("escape", '\u0059', code.ToString())]);
+            data.Add(true, C0.ESC + code.ToString() + "\u0059",
+                [new ActionRecord("escape", '\u0059', code.ToString())]);
+        }
+
+        // TODO: Collect with many characters
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetEscapeSequenceWithManyIntermediatesTestData))]
+    public void Parse_EscapeSequenceWithManyIntermediatesInput_CallEscapeHandlerWithCollect(bool legacyMode,
+        string text, List<ActionRecord> expected)
+    {
+        var parser = new EscapeSequenceParser
+        {
+            LegacyMode = legacyMode
+        };
+        var handler = new MockHandler(parser);
+
+        parser.Parse(text);
+        var actual = handler.Actions;
+
         Assert.Equal(expected, actual);
     }
 }
