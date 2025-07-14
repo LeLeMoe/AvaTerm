@@ -1,9 +1,8 @@
 ﻿using System.Reflection;
+using System.Text;
 using AvaTerm.Data;
 using AvaTerm.Parser;
 using static AvaTerm.Parser.EscapeSequenceParser;
-using C0 = AvaTerm.Data.C0Controls;
-using C1 = AvaTerm.Data.C1Controls;
 
 namespace AvaTerm.Base.Tests.Parser;
 
@@ -96,6 +95,16 @@ public class EscapeSequenceParserTests
         private readonly int[]? _param;
         private readonly string? _text;
 
+        public static bool operator ==(ActionRecord left, ActionRecord right)
+        {
+            return left.Equals(right);
+        }
+
+        public static bool operator !=(ActionRecord left, ActionRecord right)
+        {
+            return !(left == right);
+        }
+
         public ActionRecord(string action)
         {
             _action = action;
@@ -183,23 +192,54 @@ public class EscapeSequenceParserTests
             return hash.ToHashCode();
         }
 
-        public static bool operator ==(ActionRecord left, ActionRecord right)
+        public override string ToString()
         {
-            return left.Equals(right);
-        }
+            var stringBuilder = new StringBuilder();
 
-        public static bool operator !=(ActionRecord left, ActionRecord right)
-        {
-            return !(left == right);
+            stringBuilder.Append("(action: \"");
+            stringBuilder.Append(_action);
+            stringBuilder.Append('\"');
+
+            if (_code is not null)
+            {
+                stringBuilder.Append(", code: \"");
+                stringBuilder.Append(ToHexString(_code.ToString()));
+                stringBuilder.Append('\"');
+            }
+
+            if (_collect is not null)
+            {
+                stringBuilder.Append(", collect: \"");
+                stringBuilder.Append(ToHexString(_collect));
+                stringBuilder.Append('\"');
+            }
+
+            if (_param is not null)
+            {
+                stringBuilder.Append(", param: \"");
+                stringBuilder.Append(_param);
+                stringBuilder.Append('\"');
+            }
+
+            if (_text is not null)
+            {
+                stringBuilder.Append(", text: \"");
+                stringBuilder.Append(ToHexString(_text));
+                stringBuilder.Append('\"');
+            }
+
+            stringBuilder.Append(')');
+
+            return stringBuilder.ToString();
         }
     }
 
-    public class TransitionTableCompletenessTestData
+    public readonly struct TransitionTableCompletenessTestData
     {
         private readonly string _stateName = "";
 
-        public byte Code { get; private set; }
-        public int State { get; private set; }
+        public byte Code { get; }
+        public int State { get; }
 
         public TransitionTableCompletenessTestData()
         {
@@ -214,7 +254,63 @@ public class EscapeSequenceParserTests
 
         public override string ToString()
         {
-            return $"(code: {Code}, state: {_stateName})";
+            return $"(code: \"\\x{Code:X4}\", state: {_stateName})";
+        }
+    }
+
+    public readonly struct MapCodeTestData
+    {
+        public char RawCode { get; }
+        public byte ExpectedCode { get; }
+
+        // public MapCodeTestData()
+        // {
+        // }
+
+        public MapCodeTestData(char rawCode, byte expectedCode)
+        {
+            RawCode = rawCode;
+            ExpectedCode = expectedCode;
+        }
+
+        public override string ToString()
+        {
+            return $"(code: \"\\x{(int)RawCode:X4}\")";
+        }
+    }
+
+    public readonly struct ParseTestData
+    {
+        public bool? LegacyMode { get; }
+        public string Text { get; }
+        public List<ActionRecord> ExpectedActions { get; }
+
+        public ParseTestData()
+        {
+        }
+
+        public ParseTestData(string text, List<ActionRecord> expectedActions)
+        {
+            Text = text;
+            ExpectedActions = expectedActions;
+        }
+
+        public ParseTestData(bool legacyMode, string text, List<ActionRecord> expectedActions)
+            : this(text, expectedActions)
+        {
+            LegacyMode = legacyMode;
+        }
+
+        public override string ToString()
+        {
+            if (LegacyMode is null)
+            {
+                return $"(text: \"{ToHexString(Text)}\")";
+            }
+            else
+            {
+                return $"(legacyMode: {LegacyMode}, text: \"{ToHexString(Text)}\")";
+            }
         }
     }
 
@@ -238,6 +334,18 @@ public class EscapeSequenceParserTests
         Assert.NotNull(allActions);
 
         return allActions;
+    }
+
+    private static string ToHexString(string text)
+    {
+        var stringBuilder = new StringBuilder();
+
+        foreach (var code in text)
+        {
+            stringBuilder.Append($"\\x{(int)code:X4}");
+        }
+
+        return stringBuilder.ToString();
     }
 
     public static TheoryData<TransitionTableCompletenessTestData> GetTransitionTableCompletenessTestData()
@@ -313,25 +421,25 @@ public class EscapeSequenceParserTests
         Assert.NotEqual(invalidState.Name, resultStateName);
     }
 
-    public static TheoryData<char, byte> GetMapCodeTestDataForLegacyMode()
+    public static TheoryData<MapCodeTestData> GetMapCodeTestDataForLegacyMode()
     {
-        var data = new TheoryData<char, byte>();
+        var data = new TheoryData<MapCodeTestData>();
 
         // Invalid Unicode characters
-        data.Add('\u0100', 0x00);
-        data.Add('\uFFFF', 0x00);
-        data.Add('\u5948', 0x00);
+        data.Add(new MapCodeTestData('\u0100', 0x00));
+        data.Add(new MapCodeTestData('\uFFFF', 0x00));
+        data.Add(new MapCodeTestData('\u5948', 0x00));
 
         // All characters in GR area
         for (var code = '\u00A0'; code <= '\u00FF'; ++code)
         {
-            data.Add(code, (byte)(code - 0x0080));
+            data.Add(new MapCodeTestData(code, (byte)(code - 0x0080)));
         }
 
         // All characters in C0, GL and C1 areas
         for (var code = '\u0000'; code <= '\u009F'; ++code)
         {
-            data.Add(code, (byte)code);
+            data.Add(new MapCodeTestData(code, (byte)code));
         }
 
         return data;
@@ -339,7 +447,7 @@ public class EscapeSequenceParserTests
 
     [Theory]
     [MemberData(nameof(GetMapCodeTestDataForLegacyMode))]
-    public void MapCode_LegacyMode_CharInput_ReturnValidMappedCode(char rawCode, byte mappedCode)
+    public void MapCode_LegacyMode_CharInput_ReturnValidMappedCode(MapCodeTestData data)
     {
         var parser = new EscapeSequenceParser
         {
@@ -351,26 +459,26 @@ public class EscapeSequenceParserTests
             .GetMethod("MapCode", BindingFlags.NonPublic | BindingFlags.Instance);
         Assert.NotNull(mapCodeFunc);
 
-        var result = mapCodeFunc.Invoke(parser, [rawCode]);
+        var result = mapCodeFunc.Invoke(parser, [data.RawCode]);
         Assert.NotNull(result);
-        var resultValue = (byte)result;
+        var actual = (byte)result;
 
-        Assert.Equal(mappedCode, resultValue);
+        Assert.Equal(data.ExpectedCode, actual);
     }
 
-    public static TheoryData<char, byte> GetMapCodeTestDataForUnicodeMode()
+    public static TheoryData<MapCodeTestData> GetMapCodeTestDataForUnicodeMode()
     {
-        var data = new TheoryData<char, byte>();
+        var data = new TheoryData<MapCodeTestData>();
 
         // Unicode characters
-        data.Add('\u00A0', 0xA0);
-        data.Add('\uFFFF', 0xA0);
-        data.Add('\u5948', 0xA0);
+        data.Add(new MapCodeTestData('\u00A0', 0xA0));
+        data.Add(new MapCodeTestData('\uFFFF', 0xA0));
+        data.Add(new MapCodeTestData('\u5948', 0xA0));
 
         // All characters in C0, GL and C1 areas
         for (var code = '\u0000'; code <= '\u009F'; ++code)
         {
-            data.Add(code, (byte)code);
+            data.Add(new MapCodeTestData(code, (byte)code));
         }
 
         return data;
@@ -378,7 +486,7 @@ public class EscapeSequenceParserTests
 
     [Theory]
     [MemberData(nameof(GetMapCodeTestDataForUnicodeMode))]
-    public void MapCode_UnicodeMode_CharInput_ReturnValidMappedCode(char rawCode, byte mappedCode)
+    public void MapCode_UnicodeMode_CharInput_ReturnValidMappedCode(MapCodeTestData data)
     {
         var parser = new EscapeSequenceParser
         {
@@ -390,41 +498,49 @@ public class EscapeSequenceParserTests
             .GetMethod("MapCode", BindingFlags.NonPublic | BindingFlags.Instance);
         Assert.NotNull(mapCodeFunc);
 
-        var result = mapCodeFunc.Invoke(parser, [rawCode]);
+        var result = mapCodeFunc.Invoke(parser, [data.RawCode]);
         Assert.NotNull(result);
-        var resultValue = (byte)result;
+        var actual = (byte)result;
 
-        Assert.Equal(mappedCode, resultValue);
+        Assert.Equal(data.ExpectedCode, actual);
     }
 
-    public static TheoryData<string> GetPrintableInputTestDataForLegacyMode()
+    public static TheoryData<ParseTestData> GetPrintableInputTestDataForLegacyMode()
     {
-        var data = new TheoryData<string>();
+        var data = new TheoryData<ParseTestData>();
 
         // Characters in GL area
         for (var code = '\u0020'; code <= '\u007F'; ++code)
         {
-            data.Add(code.ToString());
+            AddData(code.ToString());
         }
 
         // Characters in GR area
         for (var code = '\u00A0'; code <= '\u00FF'; ++code)
         {
-            data.Add(code.ToString());
+            AddData(code.ToString());
         }
 
         // Consecutive valid characters
-        data.Add("The quick brown fox jumps over the lazy dog.");
-        data.Add("\u00AE\u00F9\u00E4\u00E0\u00E8\u00A9\u00BB\u00F5\u00AE\u00DC\u00C8");
-        data.Add("\u00DB\u007A\u00CB\u00F0\u0068\u0061\u006A\u00E6\u0040\u0031");
-        data.Add("\u007F\u007F\u00FF\u00A0\u00FF\u0020\u00FF\u007F");
+        AddData("The quick brown fox jumps over the lazy dog.");
+        AddData("\u00AE\u00F9\u00E4\u00E0\u00E8\u00A9\u00BB\u00F5\u00AE\u00DC\u00C8");
+        AddData("\u00DB\u007A\u00CB\u00F0\u0068\u0061\u006A\u00E6\u0040\u0031");
+        AddData("\u007F\u007F\u00FF\u00A0\u00FF\u0020\u00FF\u007F");
 
         return data;
+
+        // Helper functions
+        // ----------------
+        // Add a string to test data sets
+        void AddData(string text)
+        {
+            data.Add(new ParseTestData(text, [new ActionRecord("print", text)]));
+        }
     }
 
     [Theory]
     [MemberData(nameof(GetPrintableInputTestDataForLegacyMode))]
-    public void Parse_LegacyMode_PrintableInput_CallPrintHandler(string text)
+    public void Parse_LegacyMode_PrintableInput_CallPrintHandler(ParseTestData data)
     {
         var parser = new EscapeSequenceParser
         {
@@ -432,41 +548,48 @@ public class EscapeSequenceParserTests
         };
         var handler = new MockHandler(parser);
 
-        parser.Parse(text);
+        parser.Parse(data.Text);
         var actual = handler.Actions;
 
-        var expected = new List<ActionRecord> { new ActionRecord("print", text) };
-        Assert.Equal(expected, actual);
+        Assert.Equal(data.ExpectedActions, actual);
     }
 
-    public static TheoryData<string> GetPrintableInputTestDataFoUnicodeMode()
+    public static TheoryData<ParseTestData> GetPrintableInputTestDataFoUnicodeMode()
     {
-        var data = new TheoryData<string>();
+        var data = new TheoryData<ParseTestData>();
 
         // Characters in GL area
         for (var code = '\u0020'; code <= '\u007F'; ++code)
         {
-            data.Add(code.ToString());
+            AddData(code.ToString());
         }
 
         // Single Unicode character
-        data.Add("\u00A0");
-        data.Add("\uFFFF");
-        data.Add("\u5948");
-        data.Add("\uD616");
+        AddData("\u00A0");
+        AddData("\uFFFF");
+        AddData("\u5948");
+        AddData("\uD616");
 
         // Consecutive valid characters
-        data.Add("The quick brown fox jumps over the lazy dog.");
-        data.Add("\u46CD\u3635\uF068\uB935\u0801\u2F68\uF30C\uA176");
-        data.Add("\uC65B\u0023\u0FB7\u04B5\uE5D1\uBBFB\u007C\u8549\u6F38\u1246\u006E");
-        data.Add("\uFFFF\u0020\u0020\uFFFF\uFFFF\u007F\u00A0\u007F");
+        AddData("The quick brown fox jumps over the lazy dog.");
+        AddData("\u46CD\u3635\uF068\uB935\u0801\u2F68\uF30C\uA176");
+        AddData("\uC65B\u0023\u0FB7\u04B5\uE5D1\uBBFB\u007C\u8549\u6F38\u1246\u006E");
+        AddData("\uFFFF\u0020\u0020\uFFFF\uFFFF\u007F\u00A0\u007F");
 
         return data;
+
+        // Helper functions
+        // ----------------
+        // Add a string to test data sets
+        void AddData(string text)
+        {
+            data.Add(new ParseTestData(text, [new ActionRecord("print", text)]));
+        }
     }
 
     [Theory]
     [MemberData(nameof(GetPrintableInputTestDataFoUnicodeMode))]
-    public void Parse_UnicodeMode_PrintableInput_CallPrintHandler(string text)
+    public void Parse_UnicodeMode_PrintableInput_CallPrintHandler(ParseTestData data)
     {
         var parser = new EscapeSequenceParser
         {
@@ -474,66 +597,69 @@ public class EscapeSequenceParserTests
         };
         var handler = new MockHandler(parser);
 
-        parser.Parse(text);
+        parser.Parse(data.Text);
         var actual = handler.Actions;
 
-        var expected = new List<ActionRecord> { new ActionRecord("print", text) };
-        Assert.Equal(expected, actual);
+        Assert.Equal(data.ExpectedActions, actual);
     }
 
-    public static TheoryData<bool, string> GetControlCharactersInputTestData()
+    public static TheoryData<ParseTestData> GetControlCharactersInputTestData()
     {
-        var data = new TheoryData<bool, string>();
+        var data = new TheoryData<ParseTestData>();
         var executableC0 = C0.All.Except([C0.ESC]).ToArray();
         var executableC1 = C1.All.Except([C1.DCS, C1.SOS, C1.CSI, C1.ST, C1.OSC, C1.PM, C1.APC]).ToArray();
 
         // C0 characters
         foreach (var code in executableC0)
         {
-            data.Add(false, code.ToString());
-            data.Add(true, code.ToString());
+            AddData(code.ToString());
         }
 
         // C1 characters
         foreach (var code in executableC1)
         {
-            data.Add(false, code.ToString());
-            data.Add(true, code.ToString());
+            AddData(code.ToString());
         }
 
         // C0 and C1 controls sequences
-        data.Add(false, "\u0006\u000A\u0018");
-        data.Add(true, "\u0006\u000A\u0018");
-        data.Add(false, "\u0081\u008E\u0095\u008F");
-        data.Add(true, "\u0081\u008E\u0095\u008F");
-        data.Add(false, "\u0082\u008F\u0083\u000B\u0094\u0009");
-        data.Add(true, "\u0082\u008F\u0083\u000B\u0094\u0009");
-        data.Add(false, "\u0014\u0011\u0092\u0003\u001E\u008A");
-        data.Add(true, "\u0014\u0011\u0092\u0003\u001E\u008A");
+        AddData("\u0006\u000A\u0018");
+        AddData("\u0081\u008E\u0095\u008F");
+        AddData("\u0082\u008F\u0083\u000B\u0094\u0009");
+        AddData("\u0014\u0011\u0092\u0003\u001E\u008A");
 
         return data;
+
+        // Helper functions
+        // ----------------
+        // Add a string to test data sets
+        void AddData(string text)
+        {
+            data.Add(new ParseTestData(false, text, text.Select(c => new ActionRecord("execute", c)).ToList()));
+            data.Add(new ParseTestData(true, text, text.Select(c => new ActionRecord("execute", c)).ToList()));
+        }
     }
 
     [Theory]
     [MemberData(nameof(GetControlCharactersInputTestData))]
-    public void Parse_ControlCharactersInput_CallExecuteHandler(bool legacyMode, string text)
+    public void Parse_ControlCharactersInput_CallExecuteHandler(ParseTestData data)
     {
+        Assert.NotNull(data.LegacyMode);
+
         var parser = new EscapeSequenceParser
         {
-            LegacyMode = legacyMode
+            LegacyMode = data.LegacyMode ?? false
         };
         var handler = new MockHandler(parser);
 
-        parser.Parse(text);
+        parser.Parse(data.Text);
         var actual = handler.Actions;
 
-        var expected = text.Select(code => new ActionRecord("execute", code)).ToList();
-        Assert.Equal(expected, actual);
+        Assert.Equal(data.ExpectedActions, actual);
     }
 
-    public static TheoryData<bool, string, List<ActionRecord>> GetEscapeSequenceWithOneIntermediateTestData()
+    public static TheoryData<ParseTestData> GetEscapeSequenceWithOneIntermediateTestData()
     {
-        var data = new TheoryData<bool, string, List<ActionRecord>>();
+        var data = new TheoryData<ParseTestData>();
         var validIntermediate = Enumerable.Range('\u0030', '\u007E' - '\u0030' + 1)
             .Except(['\u0050', '\u0058', '\u0059', '\u005B', '\u005D', '\u005E', '\u005F'])
             .Select(c => (char)c)
@@ -541,8 +667,8 @@ public class EscapeSequenceParserTests
 
         foreach (var code in validIntermediate)
         {
-            data.Add(false, C0.ESC + code.ToString(), [new ActionRecord("escape", code, "")]);
-            data.Add(true, C0.ESC + code.ToString(), [new ActionRecord("escape", code, "")]);
+            data.Add(new ParseTestData(false, C0.ESC + code.ToString(), [new ActionRecord("escape", code, "")]));
+            data.Add(new ParseTestData(true, C0.ESC + code.ToString(), [new ActionRecord("escape", code, "")]));
         }
 
         return data;
@@ -550,65 +676,67 @@ public class EscapeSequenceParserTests
 
     [Theory]
     [MemberData(nameof(GetEscapeSequenceWithOneIntermediateTestData))]
-    public void Parse_EscapeSequenceWithOneIntermediateInput_CallEscapeHandlerWithEmptyCollect(bool legacyMode,
-        string text, List<ActionRecord> expected)
+    public void Parse_EscapeSequenceWithOneIntermediateInput_CallEscapeHandlerWithEmptyCollect(ParseTestData data)
     {
+        Assert.NotNull(data.LegacyMode);
+
         var parser = new EscapeSequenceParser
         {
-            LegacyMode = legacyMode
+            LegacyMode = data.LegacyMode ?? false
         };
         var handler = new MockHandler(parser);
 
-        parser.Parse(text);
+        parser.Parse(data.Text);
         var actual = handler.Actions;
 
-        Assert.Equal(expected, actual);
+        Assert.Equal(data.ExpectedActions, actual);
     }
 
-    public static TheoryData<bool, string, List<ActionRecord>> GetEscapeSequenceWithManyIntermediatesTestData()
+    public static TheoryData<ParseTestData> GetEscapeSequenceWithManyIntermediatesTestData()
     {
-        var data = new TheoryData<bool, string, List<ActionRecord>>();
+        var data = new TheoryData<ParseTestData>();
         var validIntermediate = Enumerable.Range('\u0020', '\u002F' - '\u0020' + 1)
             .Select(c => (char)c)
             .ToArray();
 
         foreach (var code in validIntermediate)
         {
-            data.Add(false, C0.ESC + code.ToString() + "\u0030",
-                [new ActionRecord("escape", '\u0030', code.ToString())]);
-            data.Add(true, C0.ESC + code.ToString() + "\u0030",
-                [new ActionRecord("escape", '\u0030', code.ToString())]);
-
-            data.Add(false, C0.ESC + code.ToString() + "\u007E",
-                [new ActionRecord("escape", '\u007E', code.ToString())]);
-            data.Add(true, C0.ESC + code.ToString() + "\u007E",
-                [new ActionRecord("escape", '\u007E', code.ToString())]);
-
-            data.Add(false, C0.ESC + code.ToString() + "\u0059",
-                [new ActionRecord("escape", '\u0059', code.ToString())]);
-            data.Add(true, C0.ESC + code.ToString() + "\u0059",
-                [new ActionRecord("escape", '\u0059', code.ToString())]);
+            AddData('\u0030', code.ToString());
+            AddData('\u007E', code.ToString());
+            AddData('\u0059', code.ToString());
         }
 
         // TODO: Collect with many characters
 
         return data;
+
+        // Helper functions
+        // ----------------
+        // Add an escape sequence to test data sets
+        void AddData(char code, string collect)
+        {
+            data.Add(new ParseTestData(false, C0.ESC + collect + code.ToString(),
+                [new ActionRecord("escape", code, collect)]));
+            data.Add(new ParseTestData(true, C0.ESC + collect + code.ToString(),
+                [new ActionRecord("escape", code, collect)]));
+        }
     }
 
     [Theory]
     [MemberData(nameof(GetEscapeSequenceWithManyIntermediatesTestData))]
-    public void Parse_EscapeSequenceWithManyIntermediatesInput_CallEscapeHandlerWithCollect(bool legacyMode,
-        string text, List<ActionRecord> expected)
+    public void Parse_EscapeSequenceWithManyIntermediatesInput_CallEscapeHandlerWithCollect(ParseTestData data)
     {
+        Assert.NotNull(data.LegacyMode);
+
         var parser = new EscapeSequenceParser
         {
-            LegacyMode = legacyMode
+            LegacyMode = data.LegacyMode ?? false
         };
         var handler = new MockHandler(parser);
 
-        parser.Parse(text);
+        parser.Parse(data.Text);
         var actual = handler.Actions;
 
-        Assert.Equal(expected, actual);
+        Assert.Equal(data.ExpectedActions, actual);
     }
 }

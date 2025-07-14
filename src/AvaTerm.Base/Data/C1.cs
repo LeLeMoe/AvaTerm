@@ -2,7 +2,7 @@
 
 namespace AvaTerm.Data
 {
-    internal class C1Controls
+    internal static class C1
     {
         private const char Start = PAD;
         private const char End = APC;

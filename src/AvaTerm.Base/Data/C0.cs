@@ -2,7 +2,7 @@
 
 namespace AvaTerm.Data
 {
-    internal class C0Controls
+    internal static class C0
     {
         private const char Start = NUL;
         private const char End = US;
