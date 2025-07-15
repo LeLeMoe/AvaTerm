@@ -203,7 +203,7 @@ public class EscapeSequenceParserTests
             if (_code is not null)
             {
                 stringBuilder.Append(", code: \"");
-                stringBuilder.Append(ToHexString(_code.ToString()));
+                stringBuilder.Append(ToHexString(_code!.ToString()));
                 stringBuilder.Append('\"');
             }
 
@@ -216,9 +216,19 @@ public class EscapeSequenceParserTests
 
             if (_param is not null)
             {
-                stringBuilder.Append(", param: \"");
-                stringBuilder.Append(_param);
-                stringBuilder.Append('\"');
+                stringBuilder.Append(", param: [");
+
+                for (var i = 0; i < _param.Length; ++i)
+                {
+                    stringBuilder.Append(_param[i]);
+
+                    if (i != _param.Length - 1)
+                    {
+                        stringBuilder.Append(", ");
+                    }
+                }
+
+                stringBuilder.Append(']');
             }
 
             if (_text is not null)
@@ -241,10 +251,6 @@ public class EscapeSequenceParserTests
         public byte Code { get; }
         public int State { get; }
 
-        public TransitionTableCompletenessTestData()
-        {
-        }
-
         public TransitionTableCompletenessTestData(byte code, int state, string stateName)
         {
             Code = code;
@@ -263,10 +269,6 @@ public class EscapeSequenceParserTests
         public char RawCode { get; }
         public byte ExpectedCode { get; }
 
-        // public MapCodeTestData()
-        // {
-        // }
-
         public MapCodeTestData(char rawCode, byte expectedCode)
         {
             RawCode = rawCode;
@@ -282,8 +284,8 @@ public class EscapeSequenceParserTests
     public readonly struct ParseTestData
     {
         public bool? LegacyMode { get; }
-        public string Text { get; }
-        public List<ActionRecord> ExpectedActions { get; }
+        public string Text { get; } = "";
+        public List<ActionRecord> ExpectedActions { get; } = [];
 
         public ParseTestData()
         {
@@ -529,8 +531,8 @@ public class EscapeSequenceParserTests
 
         return data;
 
-        // Helper functions
-        // ----------------
+        // Helper function(s)
+        // ------------------
         // Add a string to test data sets
         void AddData(string text)
         {
@@ -578,7 +580,7 @@ public class EscapeSequenceParserTests
 
         return data;
 
-        // Helper functions
+        // Helper function(s)
         // ----------------
         // Add a string to test data sets
         void AddData(string text)
@@ -629,7 +631,7 @@ public class EscapeSequenceParserTests
 
         return data;
 
-        // Helper functions
+        // Helper function(s)
         // ----------------
         // Add a string to test data sets
         void AddData(string text)
@@ -647,7 +649,7 @@ public class EscapeSequenceParserTests
 
         var parser = new EscapeSequenceParser
         {
-            LegacyMode = data.LegacyMode ?? false
+            LegacyMode = data.LegacyMode!.Value
         };
         var handler = new MockHandler(parser);
 
@@ -682,7 +684,7 @@ public class EscapeSequenceParserTests
 
         var parser = new EscapeSequenceParser
         {
-            LegacyMode = data.LegacyMode ?? false
+            LegacyMode = data.LegacyMode!.Value
         };
         var handler = new MockHandler(parser);
 
@@ -706,18 +708,22 @@ public class EscapeSequenceParserTests
             AddData('\u0059', code.ToString());
         }
 
-        // TODO: Collect with many characters
+        // Collect with many characters
+        AddData('\u0030', "\u002B\u0023\u002A\u0026\u002D\u0020");
+        AddData('\u007E', "\u002B\u0023\u002A\u0026\u002D\u0020");
+        AddData('\u0030', "\u0020\u0024\u002D\u0029\u002F\u002D");
+        AddData('\u007E', "\u0020\u0024\u002D\u0029\u002F\u002D");
 
         return data;
 
-        // Helper functions
-        // ----------------
+        // Helper function(s)
+        // ------------------
         // Add an escape sequence to test data sets
         void AddData(char code, string collect)
         {
-            data.Add(new ParseTestData(false, C0.ESC + collect + code.ToString(),
+            data.Add(new ParseTestData(false, C0.ESC + collect + code,
                 [new ActionRecord("escape", code, collect)]));
-            data.Add(new ParseTestData(true, C0.ESC + collect + code.ToString(),
+            data.Add(new ParseTestData(true, C0.ESC + collect + code,
                 [new ActionRecord("escape", code, collect)]));
         }
     }
@@ -730,7 +736,107 @@ public class EscapeSequenceParserTests
 
         var parser = new EscapeSequenceParser
         {
-            LegacyMode = data.LegacyMode ?? false
+            LegacyMode = data.LegacyMode!.Value
+        };
+        var handler = new MockHandler(parser);
+
+        parser.Parse(data.Text);
+        var actual = handler.Actions;
+
+        Assert.Equal(data.ExpectedActions, actual);
+    }
+
+    public static TheoryData<ParseTestData> GetCsiSequenceWithoutParamAndCollectTestData()
+    {
+        var data = new TheoryData<ParseTestData>();
+
+        for (var code = '\u0040'; code <= '\u007E'; ++code)
+        {
+            AddData(code);
+        }
+
+        return data;
+
+        // Helper function(s)
+        // ------------------
+        // Add a CSI sequence to test data sets
+        void AddData(char code)
+        {
+            var text = C0.ESC + "\u005B" + code;
+            data.Add(new ParseTestData(false, text, [new ActionRecord("csi", code, "", [0])]));
+            data.Add(new ParseTestData(true, text, [new ActionRecord("csi", code, "", [0])]));
+
+            text = C1.CSI + code.ToString();
+            data.Add(new ParseTestData(false, text, [new ActionRecord("csi", code, "", [0])]));
+            data.Add(new ParseTestData(true, text, [new ActionRecord("csi", code, "", [0])]));
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(GetCsiSequenceWithoutParamAndCollectTestData))]
+    public void Parse_CsiSequenceWithoutParamAndCollectInput_CallCsiHandlerWithEmptyParamAndCollect(ParseTestData data)
+    {
+        Assert.NotNull(data.LegacyMode);
+
+        var parser = new EscapeSequenceParser
+        {
+            LegacyMode = data.LegacyMode!.Value
+        };
+        var handler = new MockHandler(parser);
+
+        parser.Parse(data.Text);
+        var actual = handler.Actions;
+
+        Assert.Equal(data.ExpectedActions, actual);
+    }
+
+    public static TheoryData<ParseTestData> GetCsiSequenceWithCollectTestData()
+    {
+        var data = new TheoryData<ParseTestData>();
+
+        for (var code = '\u0020'; code <= '\u002F'; ++code)
+        {
+            AddData(code.ToString());
+        }
+
+        // Collect with many characters
+        AddData("\u0020\u0028\u0022\u002B\u0023\u002C");
+        AddData("\u0025\u0028\u0026\u002E\u0021\u0027\u002F\u0020");
+
+        return data;
+
+        // Helper function(s)
+        // ------------------
+        // Add a CSI sequence to test data sets
+        void AddData(string collect)
+        {
+            var text = C0.ESC + "\u005B" + collect + "\u0040";
+            data.Add(new ParseTestData(false, text, [new ActionRecord("csi", '\u0040', collect, [0])]));
+            data.Add(new ParseTestData(true, text, [new ActionRecord("csi", '\u0040', collect, [0])]));
+
+            text = C1.CSI + collect + "\u0040";
+            data.Add(new ParseTestData(false, text, [new ActionRecord("csi", '\u0040', collect, [0])]));
+            data.Add(new ParseTestData(true, text, [new ActionRecord("csi", '\u0040', collect, [0])]));
+
+            text = C0.ESC + "\u005B" + collect + "\u007E";
+            data.Add(new ParseTestData(false, text, [new ActionRecord("csi", '\u007E', collect, [0])]));
+            data.Add(new ParseTestData(true, text, [new ActionRecord("csi", '\u007E', collect, [0])]));
+
+            text = C1.CSI + collect + "\u007E";
+            data.Add(new ParseTestData(false, text, [new ActionRecord("csi", '\u007E', collect, [0])]));
+            data.Add(new ParseTestData(true, text, [new ActionRecord("csi", '\u007E', collect, [0])]));
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(GetCsiSequenceWithCollectTestData))]
+    public void Parse_CsiSequenceWithCollectInput_CallCsiHandlerWithCollectAndEmptyParam(ParseTestData data)
+    {
+        Assert.NotNull(data.LegacyMode);
+
+        var parser = new EscapeSequenceParser
+        {
+            LegacyMode = data.LegacyMode!.Value
         };
         var handler = new MockHandler(parser);
 
