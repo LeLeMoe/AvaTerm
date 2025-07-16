@@ -350,6 +350,30 @@ public class EscapeSequenceParserTests
         return stringBuilder.ToString();
     }
 
+    private static void BuildNormalCsiSequenceTestData(TheoryData<ParseTestData> data, char code, int[] param,
+        string collect)
+    {
+        var convertedParam = new StringBuilder();
+
+        for (var i = 0; i < param.Length; ++i)
+        {
+            convertedParam.Append(param[i]);
+
+            if (i != param.Length - 1)
+            {
+                convertedParam.Append(';');
+            }
+        }
+
+        var text = C0.ESC + "\u005B" + convertedParam + collect + code;
+        data.Add(new ParseTestData(false, text, [new ActionRecord("csi", code, collect, param)]));
+        data.Add(new ParseTestData(true, text, [new ActionRecord("csi", code, collect, param)]));
+
+        text = C1.CSI + convertedParam.ToString() + collect + code;
+        data.Add(new ParseTestData(false, text, [new ActionRecord("csi", code, collect, param)]));
+        data.Add(new ParseTestData(true, text, [new ActionRecord("csi", code, collect, param)]));
+    }
+
     public static TheoryData<TransitionTableCompletenessTestData> GetTransitionTableCompletenessTestData()
     {
         var data = new TheoryData<TransitionTableCompletenessTestData>();
@@ -531,8 +555,7 @@ public class EscapeSequenceParserTests
 
         return data;
 
-        // Helper function(s)
-        // ------------------
+        // Helper function
         // Add a string to test data sets
         void AddData(string text)
         {
@@ -580,8 +603,7 @@ public class EscapeSequenceParserTests
 
         return data;
 
-        // Helper function(s)
-        // ----------------
+        // Helper function
         // Add a string to test data sets
         void AddData(string text)
         {
@@ -631,8 +653,7 @@ public class EscapeSequenceParserTests
 
         return data;
 
-        // Helper function(s)
-        // ----------------
+        // Helper function
         // Add a string to test data sets
         void AddData(string text)
         {
@@ -716,15 +737,12 @@ public class EscapeSequenceParserTests
 
         return data;
 
-        // Helper function(s)
-        // ------------------
+        // Helper function
         // Add an escape sequence to test data sets
         void AddData(char code, string collect)
         {
-            data.Add(new ParseTestData(false, C0.ESC + collect + code,
-                [new ActionRecord("escape", code, collect)]));
-            data.Add(new ParseTestData(true, C0.ESC + collect + code,
-                [new ActionRecord("escape", code, collect)]));
+            data.Add(new ParseTestData(false, C0.ESC + collect + code, [new ActionRecord("escape", code, collect)]));
+            data.Add(new ParseTestData(true, C0.ESC + collect + code, [new ActionRecord("escape", code, collect)]));
         }
     }
 
@@ -752,24 +770,10 @@ public class EscapeSequenceParserTests
 
         for (var code = '\u0040'; code <= '\u007E'; ++code)
         {
-            AddData(code);
+            BuildNormalCsiSequenceTestData(data, code, [0], "");
         }
 
         return data;
-
-        // Helper function(s)
-        // ------------------
-        // Add a CSI sequence to test data sets
-        void AddData(char code)
-        {
-            var text = C0.ESC + "\u005B" + code;
-            data.Add(new ParseTestData(false, text, [new ActionRecord("csi", code, "", [0])]));
-            data.Add(new ParseTestData(true, text, [new ActionRecord("csi", code, "", [0])]));
-
-            text = C1.CSI + code.ToString();
-            data.Add(new ParseTestData(false, text, [new ActionRecord("csi", code, "", [0])]));
-            data.Add(new ParseTestData(true, text, [new ActionRecord("csi", code, "", [0])]));
-        }
     }
 
     [Theory]
@@ -796,41 +800,127 @@ public class EscapeSequenceParserTests
 
         for (var code = '\u0020'; code <= '\u002F'; ++code)
         {
-            AddData(code.ToString());
+            BuildNormalCsiSequenceTestData(data, '\u0040', [0], code.ToString());
+            BuildNormalCsiSequenceTestData(data, '\u007E', [0], code.ToString());
         }
 
         // Collect with many characters
-        AddData("\u0020\u0028\u0022\u002B\u0023\u002C");
-        AddData("\u0025\u0028\u0026\u002E\u0021\u0027\u002F\u0020");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [0], "\u0020\u0028\u0022\u002B\u0023\u002C");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [0], "\u0020\u0028\u0022\u002B\u0023\u002C");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [0], "\u0025\u0028\u0026\u002E\u0021\u0027\u002F\u0020");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [0], "\u0025\u0028\u0026\u002E\u0021\u0027\u002F\u0020");
 
         return data;
-
-        // Helper function(s)
-        // ------------------
-        // Add a CSI sequence to test data sets
-        void AddData(string collect)
-        {
-            var text = C0.ESC + "\u005B" + collect + "\u0040";
-            data.Add(new ParseTestData(false, text, [new ActionRecord("csi", '\u0040', collect, [0])]));
-            data.Add(new ParseTestData(true, text, [new ActionRecord("csi", '\u0040', collect, [0])]));
-
-            text = C1.CSI + collect + "\u0040";
-            data.Add(new ParseTestData(false, text, [new ActionRecord("csi", '\u0040', collect, [0])]));
-            data.Add(new ParseTestData(true, text, [new ActionRecord("csi", '\u0040', collect, [0])]));
-
-            text = C0.ESC + "\u005B" + collect + "\u007E";
-            data.Add(new ParseTestData(false, text, [new ActionRecord("csi", '\u007E', collect, [0])]));
-            data.Add(new ParseTestData(true, text, [new ActionRecord("csi", '\u007E', collect, [0])]));
-
-            text = C1.CSI + collect + "\u007E";
-            data.Add(new ParseTestData(false, text, [new ActionRecord("csi", '\u007E', collect, [0])]));
-            data.Add(new ParseTestData(true, text, [new ActionRecord("csi", '\u007E', collect, [0])]));
-        }
     }
 
     [Theory]
     [MemberData(nameof(GetCsiSequenceWithCollectTestData))]
     public void Parse_CsiSequenceWithCollectInput_CallCsiHandlerWithCollectAndEmptyParam(ParseTestData data)
+    {
+        Assert.NotNull(data.LegacyMode);
+
+        var parser = new EscapeSequenceParser
+        {
+            LegacyMode = data.LegacyMode!.Value
+        };
+        var handler = new MockHandler(parser);
+
+        parser.Parse(data.Text);
+        var actual = handler.Actions;
+
+        Assert.Equal(data.ExpectedActions, actual);
+    }
+
+    public static TheoryData<ParseTestData> GetCsiSequenceWithParamTestData()
+    {
+        var data = new TheoryData<ParseTestData>();
+
+        // Numbers in range of 0 to 9
+        for (var number = 0; number < 10; ++number)
+        {
+            BuildNormalCsiSequenceTestData(data, '\u0040', [number], "");
+            BuildNormalCsiSequenceTestData(data, '\u007E', [number], "");
+        }
+
+        // Larger numbers
+        BuildNormalCsiSequenceTestData(data, '\u0040', [63], "");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [63], "");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [255], "");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [255], "");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [4095], "");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [4095], "");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [65535], "");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [65535], "");
+
+        // Many parameters
+        BuildNormalCsiSequenceTestData(data, '\u0040', [0, 63, 255, 2095, 65535], "");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [0, 63, 255, 2095, 65535], "");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [33006, 11029, 6205, 7, 28], "");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [33006, 11029, 6205, 7, 28], "");
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetCsiSequenceWithParamTestData))]
+    public void Parse_CsiSequenceWithParamInput_CallCsiHandlerWithParamAndEmptyCollect(ParseTestData data)
+    {
+        Assert.NotNull(data.LegacyMode);
+
+        var parser = new EscapeSequenceParser
+        {
+            LegacyMode = data.LegacyMode!.Value
+        };
+        var handler = new MockHandler(parser);
+
+        parser.Parse(data.Text);
+        var actual = handler.Actions;
+
+        Assert.Equal(data.ExpectedActions, actual);
+    }
+
+    public static TheoryData<ParseTestData> GetCsiSequenceWithParamAndCollectTestData()
+    {
+        var data = new TheoryData<ParseTestData>();
+
+        // One parameter and one collect character
+        BuildNormalCsiSequenceTestData(data, '\u0040', [6], "\u002A");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [6], "\u002A");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [4392], "\u0025");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [4392], "\u0025");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [34276], "\u002F");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [34276], "\u002F");
+
+        // Many parameters and one collect character
+        BuildNormalCsiSequenceTestData(data, '\u0040', [934, 65535, 3], "\u002C");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [934, 65535, 3], "\u002C");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [186, 2702, 19818, 60642], "\u0020");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [186, 2702, 19818, 60642], "\u0020");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [65535, 0], "\u0027");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [65535, 0], "\u0027");
+
+        // One parameter and many collect characters
+        BuildNormalCsiSequenceTestData(data, '\u0040', [8], "\u0020\u0024\u002D\u002D\u002F");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [8], "\u0020\u0024\u002D\u002D\u002F");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [374], "\u002D\u0028\u0028\u002A");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [374], "\u002D\u0028\u0028\u002A");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [26734], "\u002E\u002C\u002B\u0026\u0021\u002A");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [26734], "\u002E\u002C\u002B\u0026\u0021\u002A");
+
+        // Many parameters and many collect characters
+        BuildNormalCsiSequenceTestData(data, '\u0040', [33109, 3098], "\u0023\u0029\u002F");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [33109, 3098], "\u0023\u0029\u002F");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [29999, 49, 8030], "\u002C\u0027\u002B\u0026");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [29999, 49, 8030], "\u002C\u0027\u002B\u0026");
+        BuildNormalCsiSequenceTestData(data, '\u0040', [5949, 212, 4, 37715], "\u0020\u002F");
+        BuildNormalCsiSequenceTestData(data, '\u007E', [5949, 212, 4, 37715], "\u0020\u002F");
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetCsiSequenceWithParamAndCollectTestData))]
+    public void Parse_CsiSequenceWithParamAndCollectInput_CallCsiHandlerWithParamAndCollect(ParseTestData data)
     {
         Assert.NotNull(data.LegacyMode);
 
