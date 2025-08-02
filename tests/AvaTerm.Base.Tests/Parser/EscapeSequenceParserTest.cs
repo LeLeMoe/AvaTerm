@@ -1,5 +1,4 @@
-﻿using System.Data;
-using System.Reflection;
+﻿using System.Reflection;
 using AvaTerm.Data;
 using AvaTerm.Parser;
 using Moq;
@@ -321,7 +320,7 @@ public class EscapeSequenceParserTest
 
     [Theory]
     [MemberData(nameof(ExecutableTextTestData))]
-    public void Parse_ExecutableText_CallExecuteHandler(bool legacyMode, string input)
+    public void Parse_ExecutableText_CallExecuteHandlerCorrectly(bool legacyMode, string input)
     {
         var sequence = new MockSequence();
 
@@ -343,11 +342,12 @@ public class EscapeSequenceParserTest
         var data = new TheoryData<bool, string, char, string>();
         var validIntermediates = Enumerable.Range('\x30', '\x7E' - '\x30')
             .Except(['\x50', '\x58', '\x5B', '\x5D', '\x5E', '\x5F']);
+        var text = "";
 
         // All valid intermediates without collect
         foreach (char code in validIntermediates)
         {
-            var text = "\x1B" + code;
+            text = "\x1B" + code;
             data.Add(true, text, code, "");
             data.Add(false, text, code, "");
         }
@@ -359,14 +359,86 @@ public class EscapeSequenceParserTest
 
     [Theory]
     [MemberData(nameof(EscapeSequenceTestData))]
-    public void Parse_EscapeSequence_CallEscapeHandlerOnce(bool legacyMode, string input, char expectedIntermediate,
+    public void Parse_EscapeSequence_CallEscapeHandlerOnce(bool legacyMode, string input, char expectedCode,
         string expectedCollect)
     {
         var sequence = new MockSequence();
         _escapeHandler.InSequence(sequence)
-            .Setup(h => h(It.Is<char>(c => c == expectedIntermediate), It.Is<string>(c => c == expectedCollect)));
+            .Setup(h => h(It.Is<char>(c => c == expectedCode), It.Is<string>(c => c == expectedCollect)));
 
         _parser.LegacyMode = legacyMode;
+        _parser.Parse(input);
+    }
+
+    #endregion
+
+    #region Parse CSI Sequence Test
+
+    public static TheoryData<string, char, string, int[]> CsiSequenceTestData()
+    {
+        var data = new TheoryData<string, char, string, int[]>();
+
+        // Simple CSI sequence without any collect and parameters
+        for (var code = '\x40'; code <= '\x7E'; ++code)
+        {
+            data.Add(C0.ESC + "[" + code, code, "", [0]);
+            data.Add(C1.CSI + code.ToString(), code, "", [0]);
+        }
+
+        // CSI sequence with single parameter
+        for (var num = 0; num <= 9; ++num)
+        {
+            data.Add(C0.ESC + "[" + num + "A", 'A', "", [num]);
+            data.Add(C1.CSI + num.ToString() + "A", 'A', "", [num]);
+        }
+
+        data.Add(C0.ESC + "[65535D", 'D', "", [65535]);
+        data.Add(C1.CSI + "824M", 'M', "", [824]);
+
+        // Csi sequence with multiple parameters
+        data.Add(C0.ESC + "[185;62S", 'S', "", [185, 62]);
+        data.Add(C1.CSI + "595;1345;37Z", 'Z', "", [595, 1345, 37]);
+
+        // Csi sequence with collect
+        for (var collect = '\x20'; collect <= '\x2F'; ++collect)
+        {
+            data.Add(C0.ESC + "[" + collect + "F", 'F', collect.ToString(), [0]);
+            data.Add(C1.CSI + collect.ToString() + "F", 'F', collect.ToString(), [0]);
+        }
+
+        for (var collect = '\x3C'; collect <= '\x3F'; ++collect)
+        {
+            data.Add(C0.ESC + "[" + collect + "w", 'w', collect.ToString(), [0]);
+            data.Add(C1.CSI + collect.ToString() + "w", 'w', collect.ToString(), [0]);
+        }
+
+        data.Add(C0.ESC + "[/( !k", 'k', "/( !", [0]);
+        data.Add(C1.CSI + "$+h", 'h', "$+", [0]);
+
+        // Csi sequence with parameters and collect
+        data.Add(C0.ESC + "[58 @", '@', " ", [58]);
+        data.Add(C1.CSI + ">2T", 'T', ">", [2]);
+        data.Add(C0.ESC + "[?45;2001l", 'l', "?", [45, 2001]);
+        data.Add(C1.CSI + "114;514*%{", '{', "*%", [114, 514]);
+
+        // Csi sequence with empty parameters
+        data.Add(C0.ESC + "[;19g", 'g', "", [0, 19]);
+        data.Add(C1.CSI + "8;;1~", '~', "", [8, 0, 1]);
+        data.Add(C0.ESC + "[3;;,'I", 'I', ",'", [3, 0, 0]);
+        data.Add(C1.CSI + ";;;-(q", 'q', "-(", [0, 0, 0, 0]);
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(CsiSequenceTestData))]
+    public void Parse_CsiSequence_CallCsiHandlerCorrectly(string input, char expectedCode, string expectedCollect,
+        int[] expectedParam)
+    {
+        var sequence = new MockSequence();
+        _csiHandler.InSequence(sequence).Setup(h => h(It.Is<char>(c => c == expectedCode),
+            It.Is<string>(s => s == expectedCollect), It.Is<int[]>(a => a.SequenceEqual(expectedParam))));
+
         _parser.Parse(input);
     }
 
