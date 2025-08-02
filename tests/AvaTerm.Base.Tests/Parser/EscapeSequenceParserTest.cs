@@ -8,20 +8,6 @@ namespace AvaTerm.Base.Tests.Parser;
 
 public class EscapeSequenceParserTest
 {
-    private interface IDcsHandlerAdapter
-    {
-        void Hook(char code, string collect, int[] parameters);
-        void Put(string text);
-        void Unhook();
-    }
-
-    private interface IAuxStringHandlerAdapter
-    {
-        void Start();
-        void Put(string text);
-        void End();
-    }
-
     private class DcsHandlerAdapter(Mock<IDcsHandlerAdapter> mockHandler) : IDcsHandler
     {
         public void Hook(char code, string collect, int[] parameters)
@@ -56,6 +42,20 @@ public class EscapeSequenceParserTest
         {
             mockHandler.Object.End();
         }
+    }
+
+    public interface IDcsHandlerAdapter
+    {
+        void Hook(char code, string collect, int[] parameters);
+        void Put(string text);
+        void Unhook();
+    }
+
+    public interface IAuxStringHandlerAdapter
+    {
+        void Start();
+        void Put(string text);
+        void End();
     }
 
     private readonly EscapeSequenceParser _parser = new();
@@ -439,6 +439,354 @@ public class EscapeSequenceParserTest
         _csiHandler.InSequence(sequence).Setup(h => h(It.Is<char>(c => c == expectedCode),
             It.Is<string>(s => s == expectedCollect), It.Is<int[]>(a => a.SequenceEqual(expectedParam))));
 
+        _parser.Parse(input);
+    }
+
+    #endregion
+
+    #region Parse SOS Sequence Test
+
+    public static TheoryData<bool, string, string> GetSosSequenceEndWithC0StTestData()
+    {
+        var data = new TheoryData<bool, string, string>();
+
+        // All characters in GL area
+        for (var code = '\x20'; code <= '\x7F'; ++code)
+        {
+            data.Add(true, C0.ESC + "X" + code + C0.ESC + "\\", code.ToString());
+            data.Add(true, C1.SOS + code.ToString() + C0.ESC + "\\", code.ToString());
+            data.Add(false, C0.ESC + "X" + code + C0.ESC + "\\", code.ToString());
+            data.Add(false, C1.SOS + code.ToString() + C0.ESC + "\\", code.ToString());
+        }
+
+        // All characters in GR area
+        for (var code = '\xA0'; code <= '\xFF'; ++code)
+        {
+            data.Add(true, C0.ESC + "X" + code + C0.ESC + "\\", code.ToString());
+            data.Add(true, C1.SOS + code.ToString() + C0.ESC + "\\", code.ToString());
+            data.Add(false, C0.ESC + "X" + code + C0.ESC + "\\", code.ToString());
+            data.Add(false, C1.SOS + code.ToString() + C0.ESC + "\\", code.ToString());
+        }
+
+        // TODO
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetSosSequenceEndWithC0StTestData))]
+    public void Parse_SosSequenceEndWithC0St_CallSosHandlerAndEscapeHandlerCorrectly(bool legacyMode, string input,
+        string content)
+    {
+        var sequence = new MockSequence();
+        _sosHandler.InSequence(sequence).Setup(h => h.Start());
+        _sosHandler.InSequence(sequence).Setup(h => h.Put(It.Is<string>(s => s == content)));
+        _sosHandler.InSequence(sequence).Setup(h => h.End());
+        _escapeHandler.InSequence(sequence).Setup(h => h(It.Is<char>(c => c == '\\'), It.Is<string>(s => s == "")));
+
+        _parser.LegacyMode = legacyMode;
+        _parser.Parse(input);
+    }
+
+    public static TheoryData<bool, string, string> GetSosSequenceEndWithC1StTestData()
+    {
+        var data = new TheoryData<bool, string, string>();
+
+        // All characters in GL area
+        for (var code = '\x20'; code <= '\x7F'; ++code)
+        {
+            data.Add(true, C0.ESC + "X" + code + C1.ST, code.ToString());
+            data.Add(true, C1.SOS + code.ToString() + C1.ST, code.ToString());
+            data.Add(false, C0.ESC + "X" + code + C1.ST, code.ToString());
+            data.Add(false, C1.SOS + code.ToString() + C1.ST, code.ToString());
+        }
+
+        // All characters in GR area
+        for (var code = '\xA0'; code <= '\xFF'; ++code)
+        {
+            data.Add(true, C0.ESC + "X" + code + C1.ST, code.ToString());
+            data.Add(true, C1.SOS + code.ToString() + C1.ST, code.ToString());
+            data.Add(false, C0.ESC + "X" + code + C1.ST, code.ToString());
+            data.Add(false, C1.SOS + code.ToString() + C1.ST, code.ToString());
+        }
+
+        // TODO
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetSosSequenceEndWithC1StTestData))]
+    public void Parse_SosSequenceEndWithC1St_CallSosHandlerCorrectly(bool legacyMode, string input,
+        string content)
+    {
+        var sequence = new MockSequence();
+        _sosHandler.InSequence(sequence).Setup(h => h.Start());
+        _sosHandler.InSequence(sequence).Setup(h => h.Put(It.Is<string>(s => s == content)));
+        _sosHandler.InSequence(sequence).Setup(h => h.End());
+
+        _parser.LegacyMode = legacyMode;
+        _parser.Parse(input);
+    }
+
+    #endregion
+
+    #region Parse OSC Sequence Test
+
+    public static TheoryData<bool, string, string> GetOscSequenceEndWithC0StTestData()
+    {
+        var data = new TheoryData<bool, string, string>();
+
+        // All characters in GL area
+        for (var code = '\x20'; code <= '\x7F'; ++code)
+        {
+            data.Add(true, C0.ESC + "]" + code + C0.ESC + "\\", code.ToString());
+            data.Add(true, C1.OSC + code.ToString() + C0.ESC + "\\", code.ToString());
+            data.Add(false, C0.ESC + "]" + code + C0.ESC + "\\", code.ToString());
+            data.Add(false, C1.OSC + code.ToString() + C0.ESC + "\\", code.ToString());
+        }
+
+        // All characters in GR area
+        for (var code = '\xA0'; code <= '\xFF'; ++code)
+        {
+            data.Add(true, C0.ESC + "]" + code + C0.ESC + "\\", code.ToString());
+            data.Add(true, C1.OSC + code.ToString() + C0.ESC + "\\", code.ToString());
+            data.Add(false, C0.ESC + "]" + code + C0.ESC + "\\", code.ToString());
+            data.Add(false, C1.OSC + code.ToString() + C0.ESC + "\\", code.ToString());
+        }
+
+        // TODO
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetOscSequenceEndWithC0StTestData))]
+    public void Parse_OscSequenceEndWithC0St_CallOscHandlerAndEscapeHandlerCorrectly(bool legacyMode, string input,
+        string content)
+    {
+        var sequence = new MockSequence();
+        _oscHandler.InSequence(sequence).Setup(h => h.Start());
+        _oscHandler.InSequence(sequence).Setup(h => h.Put(It.Is<string>(s => s == content)));
+        _oscHandler.InSequence(sequence).Setup(h => h.End());
+        _escapeHandler.InSequence(sequence).Setup(h => h(It.Is<char>(c => c == '\\'), It.Is<string>(s => s == "")));
+
+        _parser.LegacyMode = legacyMode;
+        _parser.Parse(input);
+    }
+
+    public static TheoryData<bool, string, string> GetOscSequenceEndWithC1StTestData()
+    {
+        var data = new TheoryData<bool, string, string>();
+
+        // All characters in GL area
+        for (var code = '\x20'; code <= '\x7F'; ++code)
+        {
+            data.Add(true, C0.ESC + "]" + code + C1.ST, code.ToString());
+            data.Add(true, C1.OSC + code.ToString() + C1.ST, code.ToString());
+            data.Add(false, C0.ESC + "]" + code + C1.ST, code.ToString());
+            data.Add(false, C1.OSC + code.ToString() + C1.ST, code.ToString());
+        }
+
+        // All characters in GR area
+        for (var code = '\xA0'; code <= '\xFF'; ++code)
+        {
+            data.Add(true, C0.ESC + "]" + code + C1.ST, code.ToString());
+            data.Add(true, C1.OSC + code.ToString() + C1.ST, code.ToString());
+            data.Add(false, C0.ESC + "]" + code + C1.ST, code.ToString());
+            data.Add(false, C1.OSC + code.ToString() + C1.ST, code.ToString());
+        }
+
+        // TODO
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetOscSequenceEndWithC1StTestData))]
+    public void Parse_OscSequenceEndWithC1St_CallOscHandlerCorrectly(bool legacyMode, string input,
+        string content)
+    {
+        var sequence = new MockSequence();
+        _oscHandler.InSequence(sequence).Setup(h => h.Start());
+        _oscHandler.InSequence(sequence).Setup(h => h.Put(It.Is<string>(s => s == content)));
+        _oscHandler.InSequence(sequence).Setup(h => h.End());
+
+        _parser.LegacyMode = legacyMode;
+        _parser.Parse(input);
+    }
+
+    #endregion
+
+    #region Parse PM Sequence Test
+
+    public static TheoryData<bool, string, string> GetPmSequenceEndWithC0StTestData()
+    {
+        var data = new TheoryData<bool, string, string>();
+
+        // All characters in GL area
+        for (var code = '\x20'; code <= '\x7F'; ++code)
+        {
+            data.Add(true, C0.ESC + "^" + code + C0.ESC + "\\", code.ToString());
+            data.Add(true, C1.PM + code.ToString() + C0.ESC + "\\", code.ToString());
+            data.Add(false, C0.ESC + "^" + code + C0.ESC + "\\", code.ToString());
+            data.Add(false, C1.PM + code.ToString() + C0.ESC + "\\", code.ToString());
+        }
+
+        // All characters in GR area
+        for (var code = '\xA0'; code <= '\xFF'; ++code)
+        {
+            data.Add(true, C0.ESC + "^" + code + C0.ESC + "\\", code.ToString());
+            data.Add(true, C1.PM + code.ToString() + C0.ESC + "\\", code.ToString());
+            data.Add(false, C0.ESC + "^" + code + C0.ESC + "\\", code.ToString());
+            data.Add(false, C1.PM + code.ToString() + C0.ESC + "\\", code.ToString());
+        }
+
+        // TODO
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetPmSequenceEndWithC0StTestData))]
+    public void Parse_PmSequenceEndWithC0St_CallPmHandlerAndEscapeHandlerCorrectly(bool legacyMode, string input,
+        string content)
+    {
+        var sequence = new MockSequence();
+        _pmHandler.InSequence(sequence).Setup(h => h.Start());
+        _pmHandler.InSequence(sequence).Setup(h => h.Put(It.Is<string>(s => s == content)));
+        _pmHandler.InSequence(sequence).Setup(h => h.End());
+        _escapeHandler.InSequence(sequence).Setup(h => h(It.Is<char>(c => c == '\\'), It.Is<string>(s => s == "")));
+
+        _parser.LegacyMode = legacyMode;
+        _parser.Parse(input);
+    }
+
+    public static TheoryData<bool, string, string> GetPmSequenceEndWithC1StTestData()
+    {
+        var data = new TheoryData<bool, string, string>();
+
+        // All characters in GL area
+        for (var code = '\x20'; code <= '\x7F'; ++code)
+        {
+            data.Add(true, C0.ESC + "^" + code + C1.ST, code.ToString());
+            data.Add(true, C1.PM + code.ToString() + C1.ST, code.ToString());
+            data.Add(false, C0.ESC + "^" + code + C1.ST, code.ToString());
+            data.Add(false, C1.PM + code.ToString() + C1.ST, code.ToString());
+        }
+
+        // All characters in GR area
+        for (var code = '\xA0'; code <= '\xFF'; ++code)
+        {
+            data.Add(true, C0.ESC + "^" + code + C1.ST, code.ToString());
+            data.Add(true, C1.PM + code.ToString() + C1.ST, code.ToString());
+            data.Add(false, C0.ESC + "^" + code + C1.ST, code.ToString());
+            data.Add(false, C1.PM + code.ToString() + C1.ST, code.ToString());
+        }
+
+        // TODO
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetPmSequenceEndWithC1StTestData))]
+    public void Parse_PmSequenceEndWithC1St_CallPmHandlerCorrectly(bool legacyMode, string input,
+        string content)
+    {
+        var sequence = new MockSequence();
+        _pmHandler.InSequence(sequence).Setup(h => h.Start());
+        _pmHandler.InSequence(sequence).Setup(h => h.Put(It.Is<string>(s => s == content)));
+        _pmHandler.InSequence(sequence).Setup(h => h.End());
+
+        _parser.LegacyMode = legacyMode;
+        _parser.Parse(input);
+    }
+
+    #endregion
+
+    #region Parse APC Sequence Test
+
+    public static TheoryData<bool, string, string> GetApcSequenceEndWithC0StTestData()
+    {
+        var data = new TheoryData<bool, string, string>();
+
+        // All characters in GL area
+        for (var code = '\x20'; code <= '\x7F'; ++code)
+        {
+            data.Add(true, C0.ESC + "_" + code + C0.ESC + "\\", code.ToString());
+            data.Add(true, C1.APC + code.ToString() + C0.ESC + "\\", code.ToString());
+            data.Add(false, C0.ESC + "_" + code + C0.ESC + "\\", code.ToString());
+            data.Add(false, C1.APC + code.ToString() + C0.ESC + "\\", code.ToString());
+        }
+
+        // All characters in GR area
+        for (var code = '\xA0'; code <= '\xFF'; ++code)
+        {
+            data.Add(true, C0.ESC + "_" + code + C0.ESC + "\\", code.ToString());
+            data.Add(true, C1.APC + code.ToString() + C0.ESC + "\\", code.ToString());
+            data.Add(false, C0.ESC + "_" + code + C0.ESC + "\\", code.ToString());
+            data.Add(false, C1.APC + code.ToString() + C0.ESC + "\\", code.ToString());
+        }
+
+        // TODO
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetApcSequenceEndWithC0StTestData))]
+    public void Parse_ApcSequenceEndWithC0St_CallApcHandlerAndEscapeHandlerCorrectly(bool legacyMode, string input,
+        string content)
+    {
+        var sequence = new MockSequence();
+        _apcHandler.InSequence(sequence).Setup(h => h.Start());
+        _apcHandler.InSequence(sequence).Setup(h => h.Put(It.Is<string>(s => s == content)));
+        _apcHandler.InSequence(sequence).Setup(h => h.End());
+        _escapeHandler.InSequence(sequence).Setup(h => h(It.Is<char>(c => c == '\\'), It.Is<string>(s => s == "")));
+
+        _parser.LegacyMode = legacyMode;
+        _parser.Parse(input);
+    }
+
+    public static TheoryData<bool, string, string> GetApcSequenceEndWithC1StTestData()
+    {
+        var data = new TheoryData<bool, string, string>();
+
+        // All characters in GL area
+        for (var code = '\x20'; code <= '\x7F'; ++code)
+        {
+            data.Add(true, C0.ESC + "_" + code + C1.ST, code.ToString());
+            data.Add(true, C1.APC + code.ToString() + C1.ST, code.ToString());
+            data.Add(false, C0.ESC + "_" + code + C1.ST, code.ToString());
+            data.Add(false, C1.APC + code.ToString() + C1.ST, code.ToString());
+        }
+
+        // All characters in GR area
+        for (var code = '\xA0'; code <= '\xFF'; ++code)
+        {
+            data.Add(true, C0.ESC + "_" + code + C1.ST, code.ToString());
+            data.Add(true, C1.APC + code.ToString() + C1.ST, code.ToString());
+            data.Add(false, C0.ESC + "_" + code + C1.ST, code.ToString());
+            data.Add(false, C1.APC + code.ToString() + C1.ST, code.ToString());
+        }
+
+        // TODO
+
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(GetApcSequenceEndWithC1StTestData))]
+    public void Parse_ApcSequenceEndWithC1St_CallApcHandlerCorrectly(bool legacyMode, string input,
+        string content)
+    {
+        var sequence = new MockSequence();
+        _apcHandler.InSequence(sequence).Setup(h => h.Start());
+        _apcHandler.InSequence(sequence).Setup(h => h.Put(It.Is<string>(s => s == content)));
+        _apcHandler.InSequence(sequence).Setup(h => h.End());
+
+        _parser.LegacyMode = legacyMode;
         _parser.Parse(input);
     }
 
