@@ -646,7 +646,7 @@ public class EscapeSequenceParserTest
     }
 
     [Fact]
-    public void Parse_SosSequenceWithoutContentAndEndWithC1St_CallSosAndEscapeHandlerCorrectly()
+    public void Parse_SosSequenceWithoutContentAndEndWithC1St_CallSosHandlerCorrectly()
     {
         _parser.Parse(C0.ESC + "X" + C0.ESC + C1.ST);
 
@@ -774,7 +774,7 @@ public class EscapeSequenceParserTest
     }
 
     [Fact]
-    public void Parse_OscSequenceWithoutContentAndEndWithC1St_CallOscAndEscapeHandlerCorrectly()
+    public void Parse_OscSequenceWithoutContentAndEndWithC1St_CallOscHandlerCorrectly()
     {
         _parser.Parse(C0.ESC + "]" + C0.ESC + C1.ST);
 
@@ -902,7 +902,7 @@ public class EscapeSequenceParserTest
     }
 
     [Fact]
-    public void Parse_PmSequenceWithoutContentAndEndWithC1St_CallPmAndEscapeHandlerCorrectly()
+    public void Parse_PmSequenceWithoutContentAndEndWithC1St_CallPmHandlerCorrectly()
     {
         _parser.Parse(C0.ESC + "^" + C0.ESC + C1.ST);
 
@@ -1030,7 +1030,7 @@ public class EscapeSequenceParserTest
     }
 
     [Fact]
-    public void Parse_ApcSequenceWithoutContentAndEndWithC1St_CallApcAndEscapeHandlerCorrectly()
+    public void Parse_ApcSequenceWithoutContentAndEndWithC1St_CallApcHandlerCorrectly()
     {
         _parser.Parse(C0.ESC + "_" + C0.ESC + C1.ST);
 
@@ -1071,6 +1071,177 @@ public class EscapeSequenceParserTest
             _apcHandler.Start();
             _apcHandler.Put(expectedContent);
             _apcHandler.End();
+            _escapeHandler('\\', "");
+        });
+    }
+
+    #endregion
+
+    #region Parse DCS Sequence Test
+
+    public static TheoryData<string, char, string, int[], string> NormalDcsSequenceTestData()
+    {
+        var data = new TheoryData<string, char, string, int[], string>();
+
+        // Simple DCS sequences with content only
+        for (var code = '\x40'; code <= '\x7E'; ++code)
+        {
+            data.Add(C0.ESC + "P" + code + "dummy" + C0.ESC + "\\", code, "", [0], "dummy");
+            data.Add(C1.DCS + code.ToString() + "dummy" + C0.ESC + "\\", code, "", [0], "dummy");
+        }
+
+        foreach (var code in C0.All.Except([C0.CAN, C0.SUB, C0.ESC]))
+        {
+            data.Add(C0.ESC + "Pf" + code + C0.ESC + "\\", 'f', "", [0], code.ToString());
+            data.Add(C1.DCS + "f" + code + C0.ESC + "\\", 'f', "", [0], code.ToString());
+        }
+
+        for (var code = '\x20'; code <= '\x7E'; ++code)
+        {
+            data.Add(C0.ESC + "Pu" + code + C0.ESC + "\\", 'u', "", [0], code.ToString());
+            data.Add(C1.DCS + "u" + code + C0.ESC + "\\", 'u', "", [0], code.ToString());
+        }
+
+        for (var code = '\xA0'; code <= '\xFE'; ++code)
+        {
+            data.Add(C0.ESC + "Pc" + code + C0.ESC + "\\", 'c', "", [0], code.ToString());
+            data.Add(C1.DCS + "c" + code + C0.ESC + "\\", 'c', "", [0], code.ToString());
+        }
+
+        // DCS sequences with single parameter
+        for (var num = 0; num <= 9; ++num)
+        {
+            data.Add(C0.ESC + "P" + num + "|foo" + C0.ESC + "\\", '|', "", [num], "foo");
+            data.Add(C1.DCS + num.ToString() + "|foo" + C0.ESC + "\\", '|', "", [num], "foo");
+        }
+
+        data.Add(C0.ESC + "P65535hbar" + C0.ESC + "\\", 'h', "", [65535], "bar");
+        data.Add(C1.DCS + "824Mbar" + C0.ESC + "\\", 'M', "", [824], "bar");
+
+        // DCS sequences with multiple parameters
+        data.Add(C0.ESC + "P916;25rdummy" + C0.ESC + "\\", 'r', "", [916, 25], "dummy");
+        data.Add(C1.DCS + "595;1345;37Zdummy" + C0.ESC + "\\", 'Z', "", [595, 1345, 37], "dummy");
+
+        // DCS sequences with collect
+        for (var collect = '\x20'; collect <= '\x2F'; ++collect)
+        {
+            data.Add(C0.ESC + "P" + collect + "Jfoobar" + C0.ESC + "\\", 'J', collect.ToString(), [0], "foobar");
+            data.Add(C1.DCS + collect.ToString() + "Jfoobar" + C0.ESC + "\\", 'J', collect.ToString(), [0], "foobar");
+        }
+
+        for (var collect = '\x3C'; collect <= '\x3F'; ++collect)
+        {
+            data.Add(C0.ESC + "P" + collect + "yÁÆüßÏÐÑs" + C0.ESC + "\\", 'y', collect.ToString(), [0], "ÁÆüßÏÐÑs");
+            data.Add(C1.DCS + collect.ToString() + "yÁÆüßÏÐÑs" + C0.ESC + "\\", 'y', collect.ToString(), [0],
+                "ÁÆüßÏÐÑs");
+        }
+
+        data.Add(C0.ESC + "P/( !bbar" + C0.ESC + "\\", 'b', "/( !", [0], "bar");
+        data.Add(C1.DCS + "$+Wbar" + C0.ESC + "\\", 'W', "$+", [0], "bar");
+
+        // DCS sequences with parameters and collect
+        data.Add(C0.ESC + "P58 @hello" + C0.ESC + "\\", '@', " ", [58], "hello");
+        data.Add(C1.DCS + ">2Thello" + C0.ESC + "\\", 'T', ">", [2], "hello");
+        data.Add(C0.ESC + "P?45;2001l@^&*!@#" + C0.ESC + "\\", 'l', "?", [45, 2001], "@^&*!@#");
+        data.Add(C1.DCS + "114;514*%{@^&*!@#" + C0.ESC + "\\", '{', "*%", [114, 514], "@^&*!@#");
+
+        // DCS sequences with empty parameters
+        data.Add(C0.ESC + "P;19g¡£¥ª®±¶" + C0.ESC + "\\", 'g', "", [0, 19], "¡£¥ª®±¶");
+        data.Add(C1.DCS + "8;;1~¡£¥ª®±¶" + C0.ESC + "\\", '~', "", [8, 0, 1], "¡£¥ª®±¶");
+        data.Add(C0.ESC + "P3;;,'Istart" + C0.ESC + "\\", 'I', ",'", [3, 0, 0], "start");
+        data.Add(C1.DCS + ";;;-(qstart" + C0.ESC + "\\", 'q', "-(", [0, 0, 0, 0], "start");
+
+        return data;
+    }
+
+    public static TheoryData<string, char, string, int[], string> LegacyModeDcsSequenceTestData()
+    {
+        var data = new TheoryData<string, char, string, int[], string>();
+
+        var content = "ÁÆüßÏÐÑsøþç×m÷Ö";
+        data.Add(C0.ESC + "\xD0\xB3\xBB\xB8\xA5\xEC" + content + C0.ESC + "\\", 'l', "%", [3, 8], content);
+
+        return data;
+    }
+
+    public static TheoryData<string, char, string, int[], string> UnicodeModeDcsSequenceTestData()
+    {
+        var data = new TheoryData<string, char, string, int[], string>();
+
+        var contents = new[]
+        {
+            "\u0100",
+            "\u5948",
+            "\uFFFF",
+            "你好，世界！こんにちは、世界！반갑다 세상아",
+            "Здравствуй, мир!Γεια σου κόσμε!",
+            "😊😋😮🏢🍔",
+        };
+        foreach (var content in contents)
+        {
+            data.Add(C0.ESC + "P256;(\"+\")}" + content + C0.ESC + "\\", '}', "(\"+\")", [256, 0], content);
+        }
+
+        return data;
+    }
+
+    [Fact]
+    public void Parse_DcsSequenceWithoutContentAndEndWithC0St_CallDcsAndEscapeHandlerCorrectly()
+    {
+        _parser.Parse(C0.ESC + "Pt" + C0.ESC + "\\");
+
+        Received.InOrder(() =>
+        {
+            _dcsHandler.Hook('t', "", Arg.Is<int[]>(a => a.SequenceEqual(new[] { 0 })));
+            _dcsHandler.Unhook();
+            _escapeHandler('\\', "");
+        });
+    }
+
+    [Fact]
+    public void Parse_ApcSequenceWithoutContentAndEndWithC1St_CallDcsHandlerCorrectly()
+    {
+        _parser.Parse(C0.ESC + "Pt" + C0.ESC + C1.ST);
+
+        Received.InOrder(() =>
+        {
+            _dcsHandler.Hook('t', "", Arg.Is<int[]>(a => a.SequenceEqual(new[] { 0 })));
+            _dcsHandler.Unhook();
+        });
+    }
+
+    [Theory]
+    [MemberData(nameof(NormalDcsSequenceTestData))]
+    [MemberData(nameof(LegacyModeDcsSequenceTestData))]
+    public void Parse_LegacyMode_DcsSequence_CallDcsAndEscapeHandlerCorrectly(string input, char expectedCode,
+        string expectedCollect, int[] expectedParam, string expectedContent)
+    {
+        _parser.LegacyMode = true;
+        _parser.Parse(input);
+
+        Received.InOrder(() =>
+        {
+            _dcsHandler.Hook(expectedCode, expectedCollect, Arg.Is<int[]>(a => a.SequenceEqual(expectedParam)));
+            _dcsHandler.Put(expectedContent);
+            _dcsHandler.Unhook();
+            _escapeHandler('\\', "");
+        });
+    }
+
+    [Theory]
+    [MemberData(nameof(NormalDcsSequenceTestData))]
+    [MemberData(nameof(UnicodeModeDcsSequenceTestData))]
+    public void Parse_UnicodeMode_DcsSequence_CallDcsAndEscapeHandlerCorrectly(string input, char expectedCode,
+        string expectedCollect, int[] expectedParam, string expectedContent)
+    {
+        _parser.LegacyMode = false;
+        _parser.Parse(input);
+
+        Received.InOrder(() =>
+        {
+            _dcsHandler.Hook(expectedCode, expectedCollect, Arg.Is<int[]>(a => a.SequenceEqual(expectedParam)));
+            _dcsHandler.Put(expectedContent);
+            _dcsHandler.Unhook();
             _escapeHandler('\\', "");
         });
     }
