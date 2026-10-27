@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/AvaTerm.Core/AvaTerm.Core.csproj" />
+  <Project Path="tests/AvaTerm.Core.Tests/AvaTerm.Core.Tests.csproj" />
+</Solution>
