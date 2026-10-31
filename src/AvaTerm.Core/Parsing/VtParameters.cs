@@ -13,7 +13,7 @@ public readonly ref struct VtParameters
             _index = -1;
         }
 
-        public ReadOnlySpan<int?> Current => _parameters[_index];
+        public readonly ReadOnlySpan<int?> Current => _parameters[_index];
 
         public bool MoveNext()
         {
@@ -37,6 +37,8 @@ public readonly ref struct VtParameters
     }
 
     public int Length => _groups.Length;
+    
+    public bool IsEmpty => _groups.IsEmpty;
 
     public ReadOnlySpan<int?> this[int index] => _values[_groups[index]];
 

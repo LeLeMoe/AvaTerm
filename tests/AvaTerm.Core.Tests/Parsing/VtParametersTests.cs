@@ -13,6 +13,7 @@ public sealed class VtParametersTests
         var parameters = new VtParameters(values, groups);
 
         Assert.Equal(3, parameters.Length);
+        Assert.False(parameters.IsEmpty);
         Assert.Equal([10, null], parameters[0].ToArray());
         Assert.Equal([30], parameters[1].ToArray());
         Assert.Equal([40, 50, 60], parameters[2].ToArray());
@@ -57,6 +58,7 @@ public sealed class VtParametersTests
             : new VtParameters(ReadOnlySpan<int?>.Empty, ReadOnlySpan<Range>.Empty);
 
         Assert.Equal(0, parameters.Length);
+        Assert.True(parameters.IsEmpty);
         AssertGroups(parameters);
 
         var enumerator = parameters.GetEnumerator();
@@ -72,6 +74,7 @@ public sealed class VtParametersTests
         var parameters = new VtParameters(values, groups);
         var enumerator = parameters.GetEnumerator();
 
+        Assert.False(parameters.IsEmpty);
         Assert.True(enumerator.MoveNext());
         Assert.Equal([null], enumerator.Current.ToArray());
         Assert.Equal([null], enumerator.Current.ToArray());

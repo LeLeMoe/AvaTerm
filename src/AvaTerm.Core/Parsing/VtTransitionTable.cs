@@ -48,12 +48,12 @@ internal static class VtTransitionTable
 {
     private readonly record struct ByteRange(byte Start, byte End)
     {
-        public static implicit operator ByteRange(byte value) => new ByteRange(value, value);
+        public static implicit operator ByteRange(byte value) => new(value, value);
     }
 
     private static readonly VtTransition[,] Table = CreateTable();
 
-    private static ByteRange Range(byte start, byte end) => new ByteRange(start, end);
+    private static ByteRange Range(byte start, byte end) => new(start, end);
 
     private static void AddTransition(VtTransition[,] table, VtState state, VtState nextState, VtAction action,
         params ByteRange[] bytes)
@@ -74,8 +74,8 @@ internal static class VtTransitionTable
     private static VtTransition[,] CreateTable()
     {
         const int inputCount = byte.MaxValue - byte.MinValue + 1;
-        var stateCount = Enum.GetValues<VtState>().Length;
-        var table = new VtTransition[stateCount, inputCount];
+        var states = Enum.GetValues<VtState>();
+        var table = new VtTransition[states.Length, inputCount];
 
         // Ground internal transitions
         AddTransition(table, VtState.Ground, VtState.Ground, VtAction.Execute,
@@ -242,7 +242,7 @@ internal static class VtTransitionTable
         AddTransition(table, VtState.StringEscape, VtState.Escape, VtAction.InterruptSequence,
             Range(0x00, 0x17), 0x19, Range(0x1B, 0x5B), Range(0x5D, 0xFF));
 
-        foreach (var state in Enum.GetValues<VtState>())
+        foreach (var state in states)
         {
             // Anywhere to Ground transitions
             if (state != VtState.Invalid && state != VtState.StringEscape)
@@ -262,8 +262,5 @@ internal static class VtTransitionTable
         return table;
     }
 
-    public static VtTransition Get(VtState state, byte input)
-    {
-        return Table[(int)state, input];
-    }
+    public static VtTransition Get(VtState state, byte input) => Table[(int)state, input];
 }
